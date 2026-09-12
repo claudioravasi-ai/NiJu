@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 230" role="img" aria-label="NiJu">
+  <title>NiJu</title>
+  <g fill="none" stroke="currentColor" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
+    <!-- N: asta izquierda, hombro curvo, diagonal y remonte -->
+    <path d="M96 196 V106 C96 72 138 66 155 100 L246 182 C262 198 282 190 282 166 V74"/>
+    <!-- i -->
+    <path d="M338 196 V120"/>
+    <!-- J: asta alta con gancho a la izquierda -->
+    <path d="M416 62 V158 C416 196 366 202 352 176"/>
+    <!-- u -->
+    <path d="M492 108 V160 C492 196 548 196 548 160 V108"/>
+    <path d="M548 108 V196"/>
+  </g>
+  <circle cx="338" cy="80" r="15" fill="currentColor"/>
+</svg>

@@ -1,0 +1,22 @@
+{
+  "name": "NiJu — Comprá todo, de todo y para todo",
+  "short_name": "NiJu",
+  "description": "Un solo lugar para comparar y comprar en tiendas nacionales e internacionales, con impuestos y envío calculados de antemano.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#07070a",
+  "theme_color": "#07070a",
+  "lang": "es-AR",
+  "categories": ["shopping", "finance", "business"],
+  "icons": [
+    { "src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Buscar", "url": "./index.html#/buscar" },
+    { "name": "Calculadora de impuestos", "url": "./index.html#/impuestos" },
+    { "name": "Por mayor", "url": "./index.html#/mayorista" }
+  ]
+}

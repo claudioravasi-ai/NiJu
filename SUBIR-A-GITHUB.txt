@@ -1,0 +1,54 @@
+PASOS PARA SUBIR NiJu A GITHUB
+==============================
+
+PASO 1 — Crear el repositorio en la web
+---------------------------------------
+1. Entrá a  https://github.com  e iniciá sesión.
+2. Arriba a la derecha, el signo "+"  →  "New repository".
+3. Completá:
+     Repository name .... niju
+     Description ........ Comparador y comprador multi-tienda para Argentina
+     Public o Private ... elegí Private si no querés que lo vea nadie todavía
+4. MUY IMPORTANTE: NO marques ninguna de estas tres casillas
+     [ ] Add a README file
+     [ ] Add .gitignore
+     [ ] Choose a license
+   (si las marcás, GitHub crea archivos que chocan con los tuyos)
+5. Botón verde "Create repository".
+
+PASO 2 — Conectar tu carpeta con ese repositorio
+-------------------------------------------------
+GitHub te va a mostrar una página con comandos. Ignorala y usá estos,
+cambiando TU-USUARIO por tu nombre de usuario de GitHub:
+
+    cd ~/Desktop/Claude/niju
+    git remote add origin https://github.com/TU-USUARIO/niju.git
+    git push -u origin main
+
+PASO 3 — La contraseña
+-----------------------
+Cuando te pida usuario y contraseña:
+  · Usuario: tu nombre de usuario de GitHub
+  · Contraseña: NO es tu contraseña. Es un "token".
+
+Para sacar el token:
+  1. https://github.com/settings/tokens
+  2. "Generate new token"  →  "Generate new token (classic)"
+  3. Note: niju
+     Expiration: 90 days (o el que quieras)
+     Marcá la casilla:  repo
+  4. "Generate token"
+  5. COPIALO AHORA: no se vuelve a mostrar nunca más.
+  6. Pegalo cuando la terminal te pida la contraseña.
+
+PASO 4 — Para las próximas veces
+---------------------------------
+Cada vez que quieras guardar cambios:
+
+    cd ~/Desktop/Claude/niju
+    git add -A
+    git commit -m "describí qué cambiaste"
+    git push
+
+LISTO. El repositorio queda en:
+    https://github.com/TU-USUARIO/niju
