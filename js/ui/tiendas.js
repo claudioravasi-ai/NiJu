@@ -8,6 +8,7 @@ import { STORES, TIPO_META, MODO_META } from '../data/stores.js';
 import { CONFIG } from '../config.js';
 import { logoTienda, tagTipo } from './components.js';
 import { store } from '../state.js';
+import { salir } from '../engine/sesion.js';
 
 export function vistaTiendas(ir){
   const raiz = el('div', { class:'wrap' });
@@ -50,8 +51,14 @@ export function vistaTiendas(ir){
   }
 
   raiz.append(el('section', { class:'section' },
-    el('div', { class:'kicker' }, 'Infraestructura'),
-    el('h1', { style:{ marginBottom:'10px' } }, 'Conectores'),
+    el('div', { class:'row-b wrapf', style:{ marginBottom:'10px' } },
+      el('div', {},
+        el('div', { class:'kicker' }, 'Infraestructura'),
+        el('h1', {}, 'Conectores')),
+      el('button', { class:'btn btn-sm', onclick:() => {
+        if (!confirm('¿Salir del modo dueño?')) return;
+        salir(); toast('Saliste del modo dueño'); location.hash = '#/'; location.reload();
+      } }, ic('x'), 'Salir del modo dueño')),
     el('p', { class:'muted', style:{ maxWidth:'74ch', marginBottom:'14px' } },
       'Cada tienda entra por una vía distinta. Las que tienen API oficial son las más rápidas de poner en producción; las que no, necesitan nuestro propio proxy. El modo actual de datos es ',
       el('b', { style:{ color:'var(--win-tx)' } }, CONFIG.modoDatos.toUpperCase()), '.'),

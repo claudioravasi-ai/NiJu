@@ -139,13 +139,14 @@ function botonTema(){
 
 function construirShell(){
   const rail = el('aside', { class:'rail' },
-    el('a', { class:'brand brand-full', href:'#/', 'aria-label':'NiJu — inicio' },
+    el('a', { class:'brand brand-full', href:'#/', 'aria-label':'NiJu — inicio',
+              onclick:contarToques },
       logoNiju('logo-rail'),
       el('div', { class:'brand-sub' }, 'compra todo, de todo y para todo')),
     ...NAV.filter(n => !n.privado || esDueno()).map(n => el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => ir(n.ruta) },
       ic(n.icono), el('span', { class:'spacer' }, n.label),
       n.ruta === '#/carrito' ? el('span', { class:'tiny mono', data:{ badge:'carrito' } }, '') : null)),
-    el('div', { class:'rail-foot', onclick:contarToques, title:'' },
+    el('div', { class:'rail-foot' },
       el('div', { data:{ fx:'1' } }, ''),
       el('div', { style:{ marginTop:'6px' } }, `v${CONFIG.version} · modo ${CONFIG.modoDatos}`)));
 
@@ -159,29 +160,47 @@ function construirShell(){
 
   const topbar = el('header', { class:'topbar' },
     el('div', { class:'topbar-in' },
-      el('a', { href:'#/', class:'brand brand-movil', 'aria-label':'NiJu — inicio' }, logoNiju('logo-top')),
+      el('a', { href:'#/', class:'brand brand-movil', 'aria-label':'NiJu — inicio',
+                onclick:contarToques }, logoNiju('logo-top')),
       el('div', { class:'search' }, ic('buscar'), buscador),
       botonTema(),
+      /* Atajo al Panel para el dueño. Sin esto, desde el celular no había
+         forma de entrar: el menú lateral no existe en pantallas chicas. */
+      esDueno()
+        ? el('button', { class:'iconbtn', title:'Panel (solo vos)', 'aria-label':'Panel',
+                         style:{ color:'var(--accion)' }, onclick:() => ir('#/panel') }, ic('panel'))
+        : null,
       el('button', { class:'iconbtn', title:'Alertas', onclick:() => ir('#/cuenta') }, ic('campana')),
       el('button', { class:'iconbtn', title:'Carrito', onclick:() => ir('#/carrito') }, ic('carrito'),
         el('span', { class:'dot', data:{ badge:'top' }, hidden:true }, '0'))));
 
   const main = el('main', { class:'main' }, topbar, el('div', { id:'vista' }));
 
+  /* La barra de abajo del celular: si sos el dueño, la última posición
+     lleva al Panel en vez de a Mi cuenta. */
+  const rutasAbajo = esDueno()
+    ? ['#/', '#/buscar', '#/pedido', '#/carrito', '#/panel']
+    : TABBAR;
   const tabbar = el('nav', { class:'tabbar' },
-    ...TABBAR.map(r => { const n = NAV.find(x => x.ruta === r);
+    ...rutasAbajo.map(r => { const n = NAV.find(x => x.ruta === r);
       return el('button', { data:{ ruta:r }, onclick:() => ir(r) }, ic(n.icono), el('span', {}, n.label)); }));
 
   document.body.append(el('div', { class:'shell' }, rail, main), tabbar);
   return { buscador };
 }
 
+/* Cinco toques seguidos sobre el logo abren la puerta del dueño.
+   Funciona igual en el celular y en la computadora. */
 let toques = 0, ultimoToque = 0;
-function contarToques(){
+function contarToques(e){
   const ahora = Date.now();
   toques = (ahora - ultimoToque < 1200) ? toques + 1 : 1;
   ultimoToque = ahora;
-  if (toques >= 5){ toques = 0; location.hash = '#/entrar'; }
+  if (toques >= 5){
+    toques = 0;
+    e?.preventDefault?.();
+    location.hash = '#/entrar';
+  }
 }
 
 function marcarActivo(){

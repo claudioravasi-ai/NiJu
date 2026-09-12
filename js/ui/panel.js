@@ -12,6 +12,7 @@ import { CANALES, planDelDia, generarPieza, segmentos, programar } from '../engi
 import { TARIFARIO, calcularFee } from '../engine/fees.js';
 import { comprobanteGestion, liquidacionPeriodo, csvLibroIVAVentas, EMISOR, ALICUOTAS } from '../engine/facturacion.js';
 import { descargarCSV } from '../engine/fiscal.js';
+import { salir } from '../engine/sesion.js';
 import { vistaOportunidades } from './oportunidades.js';
 import { vistaOperacion } from './ordenes.js';
 import { FX } from '../engine/fx.js';
@@ -30,8 +31,23 @@ export function vistaPanel(ir){
       } }, n)));
 
   raiz.append(el('section', { class:'section' },
-    el('div', { class:'kicker' }, 'Solo para vos'),
-    el('h1', { style:{ marginBottom:'14px' } }, 'Panel NiJu'),
+    el('div', { class:'row-b wrapf', style:{ marginBottom:'14px' } },
+      el('div', {},
+        el('div', { class:'kicker' }, 'Solo para vos'),
+        el('h1', {}, 'Panel NiJu')),
+      el('div', { class:'row wrapf' },
+        el('span', { class:'tag tag-ok' }, '● Modo dueño activo'),
+        el('button', {
+          class:'btn btn-sm',
+          title:'Oculta el Panel y los Conectores hasta que vuelvas a entrar',
+          onclick:() => {
+            if (!confirm('¿Salir del modo dueño?\n\nEl Panel y los Conectores dejan de verse. Para volver a entrar, tocá cinco veces el logo de NiJu y poné tu clave.')) return;
+            salir();
+            toast('Saliste del modo dueño');
+            location.hash = '#/';
+            location.reload();
+          }
+        }, ic('x'), 'Salir del modo dueño'))),
     tabs, cuerpo));
 
   function pintar(){
