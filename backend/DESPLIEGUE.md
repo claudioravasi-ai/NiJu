@@ -113,3 +113,46 @@ de la bolsa de demanda.
 3. Copiá el **Access Token de producción**.
 4. Cargalo en el Worker como `MP_ACCESS_TOKEN`.
 5. Avisame y te programo el endpoint de cobro y el aviso de pago aprobado.
+
+Mientras tanto, el cliente confirma el pedido y queda **pendiente de pago**.
+Vos lo marcás como pagado en Panel → Órdenes para comprar → Por cobrar.
+
+## E. Base de datos de clientes, órdenes y compras — IMPRESCINDIBLE para vender
+
+Sin esto, cada pedido queda guardado en el teléfono del cliente y vos no lo ves.
+La app lo avisa en rojo ("Sin base de datos").
+
+1. Si no lo hiciste, creá el almacén KV y enlazalo como `NIJU` (paso B).
+2. En **Variables and Secrets** agregá `SESION_SECRETO`: una clave larga
+   cualquiera, distinta de `ADMIN_TOKEN`. Firma las sesiones de los clientes.
+   (Si no la cargás, usa `ADMIN_TOKEN`; mejor que sean distintas.)
+3. Opcional: `APP_URL` con la dirección pública de la app, para el link de
+   los emails.
+4. **Volvé a pegar `backend/worker.js` completo y Deploy.** Sin esto no existen
+   las rutas nuevas (`/v1/estado`, `/v1/clientes`, `/v1/ordenes`, `/v1/lotes`,
+   `/v1/variantes`).
+5. Probá en el navegador:
+
+```
+https://niju-api.TUCUENTA.workers.dev/v1/estado
+https://niju-api.TUCUENTA.workers.dev/v1/variantes?tienda=topper&id=topper-2531
+```
+
+La primera tiene que decir `"base":true,"cuentas":true`. La segunda devuelve
+los talles de unas zapatillas Topper con el stock de cada uno.
+
+Qué se guarda y dónde: `cliente:<email>` (datos y clave cifrada),
+`orden:<id>` (cada pedido con sus tramos por tienda, avisos e historia),
+`cliord:<email>` (qué órdenes son de cada cliente), `lote:<id>` (cada compra
+que hiciste en una tienda, con su número de pedido y su envío).
+
+## F. Emails de seguimiento (opcional)
+
+Las novedades ya se ven dentro de la app (campanita y Mis compras). Para que
+además le lleguen por email al cliente:
+
+1. Creá una cuenta en **resend.com** y verificá tu dominio (te pide agregar
+   unos registros DNS).
+2. Creá una API key.
+3. En el Worker: `RESEND_API_KEY` = la key, `AVISOS_DESDE` = `NiJu <avisos@tudominio.com>`.
+4. Deploy.

@@ -23,10 +23,15 @@ panel del dueño, PWA instalable.
 
 ## Fase 4 — Que se pueda comprar de verdad
 
-1. Mercado Pago Checkout Pro para NiJu Directo.
+Hecho (13-09-2026, ver `docs/CIRCUITO-DE-COMPRA.md`): talles leídos de la tienda,
+cuenta obligatoria con datos de filiación y fiscales, órdenes en base de datos,
+lista de compras por tienda con simulación y carrito armado, seguimiento por
+tienda con avisos al cliente, botón de arrepentimiento dentro de cada compra.
+
+1. Mercado Pago Checkout Pro (cobro y reintegros). Hoy el pago se confirma a mano.
 2. Circuito de compra asistida internacional con términos claros.
 3. Facturación electrónica con CAE.
-4. Botón de arrepentimiento y política de devoluciones.
+4. Política de devoluciones y cambios de talle; acceso al arrepentimiento desde la portada.
 
 ## Fase 5 — Que se venda sola
 

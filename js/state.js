@@ -9,7 +9,7 @@ const KEY = 'niju.state.v1';
 const PERSISTIR = ['carrito','favoritos','alertas','usuario','historial','comprasAnio',
                    'nijuExtra','config','hilos','campanias','vistos','pedidos',
                    'pilotos','campaniasGrupales','cotizaciones',
-                   'ordenes','ordenesDemanda'];
+                   'ordenes','ordenesDemanda','lotes'];
 
 const INICIAL = {
   usuario: null,                  // { nombre, email, cuit, direccion, tipo }
@@ -22,6 +22,7 @@ const INICIAL = {
   nijuExtra: [],                  // productos propios cargados desde el panel
   pedidos: [],                    // "traelo por mí": productos pedidos por link
   ordenes: [],                    // compras asistidas: una orden, varias tiendas
+  lotes: [],                      // compras hechas por el dueño en cada tienda (sin base de datos)
   ordenesDemanda: [],             // bolsa de demanda
   pilotos: [],                    // lotes de prueba antes de importar en serio
   cotizaciones: [],               // precios reales que mandaron los proveedores
@@ -61,11 +62,17 @@ class Store {
 export const store = new Store();
 
 /* ---------- Acciones de carrito ---------- */
-export function agregarAlCarrito(oferta, cant = 1){
+/* Cada talle es un renglón aparte: dos pares del 40 y uno del 42 son
+   dos compras distintas para la tienda. */
+const claveLinea = x => x.lineaId || x.ofertaId;
+
+export function agregarAlCarrito(oferta, cant = 1, variante = null){
+  const lineaId = oferta.id + (variante ? '#' + (variante.sku || variante.texto) : '');
   const c = [...store.get('carrito')];
-  const i = c.findIndex(x => x.ofertaId === oferta.id);
-  if (i >= 0) c[i].cant += cant;
+  const i = c.findIndex(x => claveLinea(x) === lineaId);
+  if (i >= 0) c[i] = { ...c[i], cant:c[i].cant + cant };
   else c.push({
+    lineaId, variante,
     ofertaId:oferta.id, tiendaId:oferta.tiendaId, productoId:oferta.productoId,
     titulo:oferta.titulo, precio:oferta.precio, moneda:oferta.moneda, envio:oferta.envio,
     emo:oferta.emo, imagen:oferta.imagen || null, cant, propio:!!oferta.propio, pesoKg:oferta.pesoKg, rubro:oferta.rubro,
@@ -73,8 +80,8 @@ export function agregarAlCarrito(oferta, cant = 1){
   });
   store.set('carrito', c);
 }
-export function cambiarCant(ofertaId, delta){
-  const c = store.get('carrito').map(x => x.ofertaId === ofertaId ? { ...x, cant:Math.max(0, x.cant + delta) } : x)
+export function cambiarCant(lineaId, delta){
+  const c = store.get('carrito').map(x => claveLinea(x) === lineaId ? { ...x, cant:Math.max(0, x.cant + delta) } : x)
                                 .filter(x => x.cant > 0);
   store.set('carrito', c);
 }

@@ -58,10 +58,16 @@ export function toast(msg, tipo = ''){
   setTimeout(() => t.remove(), 2600);
 }
 
-export function hoja({ titulo, cuerpo, ancho = 600 }){
+export function hoja({ titulo, cuerpo, ancho = 600, alCerrar }){
   const bg = el('div', { class:'sheet-bg', onclick: e => { if (e.target === bg) cerrar(); } });
   const sh = el('div', { class:'sheet', style:{ maxWidth: ancho + 'px' } });
-  const cerrar = () => { bg.remove(); document.body.style.overflow = ''; };
+  let cerrada = false;
+  const cerrar = () => {
+    if (cerrada) return;
+    cerrada = true;
+    bg.remove(); document.body.style.overflow = '';
+    alCerrar?.();
+  };
   sh.append(
     el('div', { class:'sheet-head' },
       el('h3', { class:'spacer' }, titulo),

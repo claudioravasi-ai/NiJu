@@ -18,6 +18,7 @@ import { store, agregarAlCarrito } from '../state.js';
 import { logoTienda, tagTipo, selloOrigen, esqueleto, barraProgreso, vacio, precioDual, selectorMoneda, foto } from './components.js';
 import { precioReal, tablaPerfiles, mejorParaVos, conviendCambiar } from '../engine/precio-fiscal.js';
 import { analizar } from '../engine/historial.js';
+import { selectorVariantes } from './variantes.js';
 
 /**
  * Abre la ficha comparativa.
@@ -59,12 +60,25 @@ function ficha(g, ir){
      lugar: engañoso, y quedaba un cuadro vacío al entrar a comprar. */
   const galeria = el('div', { class:'pdp-gal' });
 
+  /* Un selector de talles por tienda: lo elegido se conserva al repintar
+     y al volver a esa tienda. */
+  const selectores = new Map();
+  const selectorDe = o => {
+    if (!selectores.has(o.id)) selectores.set(o.id, selectorVariantes(o, { alCambiar:() => { if (elegida === o) pintarBuyBox(); } }));
+    return selectores.get(o.id);
+  };
+
   function pintarBuyBox(){
     const o = elegida;
     const t = STORE_BY_ID[o.tiendaId];
-    const c = o.costo;
+    const sel = selectorDe(o);
+    /* Hay talles con otro precio: se muestra el del talle elegido. */
+    const precioTalle = sel.precio();
+    const c = precioTalle && !o.costo.internacional && Math.abs(precioTalle - o.precio) > 0.5
+      ? { ...o.costo, productoARS:precioTalle }
+      : o.costo;
 
-    galeria.replaceChildren(foto({ imagen: o.imagen || g.imagen, titulo: o.titulo || g.titulo }, 'pdp-foto'));
+    galeria.replaceChildren(foto({ imagen: sel.imagen() || o.imagen || g.imagen, titulo: o.titulo || g.titulo }, 'pdp-foto'));
 
     const valorUSD = aUSD(o.precio, o.moneda);
     const fleteUSD = aUSD(o.envio || 0, o.moneda);
@@ -134,9 +148,14 @@ function ficha(g, ir){
         c.bloqueado ? el('div', { class:'notice notice-bad' },
           'Esta compra excede los límites del courier puerta a puerta. Hay que hacerla por importación general con despachante.') : null,
 
+        sel.nodo,
+
         el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => {
-          agregarAlCarrito({ ...o, costoFinal:totalFinal }, 1);
-          toast('Agregado al carrito', 'win');
+          const e = sel.eleccion();
+          if (!e.ok){ toast(e.error, 'bad'); sel.marcarFalta(); return; }
+          const v = e.variante;
+          agregarAlCarrito({ ...o, precio:v?.precio ?? o.precio, imagen:v?.imagen || o.imagen, costoFinal:totalFinal }, 1, v);
+          toast(v?.texto ? `Agregado: ${v.texto}` : 'Agregado al carrito', 'win');
         } }, ic('carrito'), o.propio ? 'Comprar ahora' : 'Comprar por NiJu'),
 
         el('button', { class:'btn btn-block', onclick:() => window.open(o.url, '_blank', 'noopener') },

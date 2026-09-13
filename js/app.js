@@ -21,6 +21,9 @@ import { vistaCuenta } from './ui/cuenta.js';
 import { vistaPanel } from './ui/panel.js';
 import { vistaMensajes } from './ui/mensajes.js';
 import { vistaTiendas } from './ui/tiendas.js';
+import { vistaMisCompras } from './ui/ordenes.js';
+import { modo, hayCuenta, refrescarPerfil } from './engine/nube.js';
+import { listarOrdenes } from './engine/ordenes.js';
 
 const NAV = [
   { ruta:'#/',          icono:'casa',     label:'Inicio' },
@@ -32,6 +35,7 @@ const NAV = [
   { ruta:'#/mayorista', icono:'caja',     label:'Por mayor' },
   { ruta:'#/mensajes',  icono:'chat',     label:'Mensajes' },
   { ruta:'#/carrito',   icono:'carrito',  label:'Carrito' },
+  { ruta:'#/compras',   icono:'caja',     label:'Mis compras' },
   { ruta:'#/cuenta',    icono:'usuario',  label:'Mi cuenta' },
   { ruta:'#/tiendas',   icono:'mundo',    label:'Conectores', privado:true },
   { ruta:'#/panel',     icono:'panel',    label:'Panel',      privado:true }
@@ -194,7 +198,9 @@ function construirShell(){
         ? el('button', { class:'iconbtn', title:'Panel (solo vos)', 'aria-label':'Panel',
                          style:{ color:'var(--accion)' }, onclick:() => ir('#/panel') }, ic('panel'))
         : null,
-      el('button', { class:'iconbtn', title:'Alertas', onclick:() => ir('#/cuenta') }, ic('campana')),
+      el('button', { class:'iconbtn', title:'Novedades de tus compras', 'aria-label':'Novedades de tus compras',
+                     onclick:() => ir('#/compras') }, ic('campana'),
+        el('span', { class:'dot', data:{ badge:'avisos' }, hidden:true }, '0')),
       el('button', { class:'iconbtn', title:'Carrito', onclick:() => ir('#/carrito') }, ic('carrito'),
         el('span', { class:'dot', data:{ badge:'top' }, hidden:true }, '0'))));
 
@@ -317,12 +323,34 @@ function rutear({ buscador }){
   } else if (ruta === '/demanda'){  vista.replaceChildren(vistaDemanda(ir));
   } else if (ruta === '/carrito'){  vista.replaceChildren(vistaCarrito(ir));
   } else if (ruta === '/cuenta'){   vista.replaceChildren(vistaCuenta(ir));
+  } else if (ruta === '/compras'){  vista.replaceChildren(vistaMisCompras(ir));
   } else if (ruta === '/entrar'){   vista.replaceChildren(vistaEntrar(ir));
   } else if (ruta === '/panel' || ruta === '/tiendas'){
     if (!esDueno()){ vista.replaceChildren(vistaEntrar(ir)); }
     else vista.replaceChildren(ruta === '/panel' ? vistaPanel(ir) : vistaTiendas(ir));
   } else if (ruta === '/mensajes'){ vista.replaceChildren(vistaMensajes(ir));
   } else { vista.replaceChildren(vistaHome(ir)); }
+}
+
+/* ------------------------------------------------------------------
+   La campanita cuenta las novedades sin leer de las compras del
+   cliente (compró, despachó, en camino, sin stock…).
+   ------------------------------------------------------------------ */
+let avisosContados = null;
+async function revisarAvisos(){
+  try{
+    const m = await modo();
+    if (m === 'sin-conexion' || (m === 'nube' && !hayCuenta())) return pintarAvisos(0);
+    const os = await listarOrdenes({ dueno:false });
+    const n = os.reduce((a, o) => a + (o.avisos || []).filter(x => !x.leido).length, 0);
+    if (avisosContados !== null && n > avisosContados && !location.hash.startsWith('#/compras'))
+      toast('Tenés novedades de tu compra', 'win');
+    avisosContados = n;
+    pintarAvisos(n);
+  }catch{}
+}
+function pintarAvisos(n){
+  document.querySelectorAll('[data-badge="avisos"]').forEach(b => { b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n); });
 }
 
 async function iniciar(){
@@ -354,6 +382,11 @@ async function iniciar(){
 
   window.addEventListener('hashchange', () => rutear(ctx));
   rutear(ctx);
+
+  refrescarPerfil();
+  revisarAvisos();
+  setInterval(revisarAvisos, 90 * 1000);
+  window.addEventListener('niju:avisos', revisarAvisos);
 
   /* El service worker guarda la app para que ande sin internet. Buenísimo en
      producción, insoportable mientras desarrollamos: sirve archivos viejos.

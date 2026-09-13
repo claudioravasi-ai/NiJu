@@ -14,14 +14,18 @@ import { calcularImportacion } from '../engine/taxes.js';
 import { aUSD, FX } from '../engine/fx.js';
 import { logoTienda, tagTipo, vacio, foto } from './components.js';
 import { plazoCorto } from '../engine/envios.js';
-import { crearOrden } from '../engine/ordenes.js';
+import { crearOrden, MODALIDADES } from '../engine/ordenes.js';
+import { asegurarCuenta } from './cuenta.js';
+import { necesitaTalle } from './variantes.js';
+import { nombreFactura, nombreCompleto, domicilioTexto, formatoCuit } from '../engine/perfil.js';
+import { PERFILES } from '../engine/fiscal.js';
 
 export function vistaCarrito(ir){
   const raiz = el('div', { class:'wrap' });
   const cuerpo = el('div', { class:'section' });
   raiz.append(cuerpo);
 
-  let entrega = 'domicilio', pago = 'mp';
+  let entrega = 'domicilio', pago = 'mp', modalidad = null;
 
   function pintar(){
     const items = store.get('carrito');
@@ -76,11 +80,13 @@ export function vistaCarrito(ir){
           foto(l, 'cart-thumb'),
           el('div', { class:'spacer' },
             el('b', { class:'tiny' }, l.titulo),
+            l.variante?.texto ? el('div', { class:'linea-var' }, l.variante.texto,
+              l.variante.manual ? el('span', { class:'dim' }, ' · lo verificamos en la tienda') : null) : null,
             el('div', { class:'tiny dim' }, plata(l.precio, l.moneda) + ' c/u')),
           el('div', { class:'qty' },
-            el('button', { onclick:() => { cambiarCant(l.ofertaId, -1); pintar(); } }, '−'),
+            el('button', { onclick:() => { cambiarCant(l.lineaId || l.ofertaId, -1); pintar(); } }, '−'),
             el('span', {}, String(l.cant)),
-            el('button', { onclick:() => { cambiarCant(l.ofertaId, 1); pintar(); } }, '+')),
+            el('button', { onclick:() => { cambiarCant(l.lineaId || l.ofertaId, 1); pintar(); } }, '+')),
           el('b', { class:'mono', style:{ width:'110px', textAlign:'right' } },
             plata((l.moneda === 'ARS' ? l.precio : l.precio * FX.tarjeta) * l.cant)))),
         el('div', { style:{ padding:'11px 14px', background:'var(--bg-2)' } },
@@ -89,6 +95,10 @@ export function vistaCarrito(ir){
           internacional ? fila('Gestión NiJu', feeARS, `${fee.pctEfectivo}% + logística`)
                       : fila('Gestión NiJu', 0, 'se cobra una sola vez al final, no por tienda'))));
     }
+
+    /* Con una sola tienda lo natural es que la tienda lo mande directo;
+       con varias, se ofrece juntar todo. El cliente puede cambiarlo. */
+    if (!modalidad) modalidad = Object.keys(porTienda).length > 1 ? 'consolidado' : 'directo';
 
     /* Comprobante por la gestión total.
        En una compra nacional asistida el cargo se calcula sobre el total
@@ -107,7 +117,8 @@ export function vistaCarrito(ir){
       jurisdiccion:store.get('config').provincia,
       cliente:{ nombre:store.get('usuario')?.nombre || 'Consumidor Final', cuit:store.get('usuario')?.cuit } });
 
-    const costoEntrega = ENTREGAS.find(e => e.id === entrega)?.costo || 0;
+    /* Si cada tienda despacha directo, el envío ya lo cobra cada una: NiJu no suma otro. */
+    const costoEntrega = modalidad === 'consolidado' ? (ENTREGAS.find(e => e.id === entrega)?.costo || 0) : 0;
     const descPago = pago === 'transfer' ? -(resumen.producto * 0.10) : 0;
     const total = Math.round(resumen.producto + resumen.envio + resumen.impuestos + comp.total + costoEntrega + descPago);
 
@@ -117,11 +128,18 @@ export function vistaCarrito(ir){
         el('div', { class:'price price-xl price-win' }, plata(total)),
         el('div', { class:'tiny dim' }, `${num(items.reduce((a,i) => a + i.cant, 0))} productos de ${Object.keys(porTienda).length} tiendas`)),
       el('div', { class:'buybox-body' },
-        el('div', { class:'kicker' }, 'Cómo llega'),
-        ...ENTREGAS.map(e => el('label', { class:'fitem' },
-          el('input', { type:'radio', name:'entrega', checked:entrega === e.id || null, onchange:() => { entrega = e.id; pintar(); } }),
-          el('span', { class:'spacer' }, `${e.icon} ${e.nombre}`, el('div', { class:'tiny dim' }, e.desc)),
-          el('b', { class:'tiny mono' }, e.costo ? plata(e.costo) : 'gratis'))),
+        el('div', { class:'kicker' }, 'Cómo lo recibís'),
+        ...Object.entries(MODALIDADES).map(([id, m]) => el('label', { class:'fitem' },
+          el('input', { type:'radio', name:'modalidad', checked:modalidad === id || null, onchange:() => { modalidad = id; pintar(); } }),
+          el('span', { class:'spacer' }, m.nombre, el('div', { class:'tiny dim' }, m.desc)))),
+        modalidad === 'consolidado'
+          ? [ el('hr', { class:'rule' }),
+              el('div', { class:'kicker' }, 'Cómo te lo llevamos'),
+              ...ENTREGAS.map(e => el('label', { class:'fitem' },
+                el('input', { type:'radio', name:'entrega', checked:entrega === e.id || null, onchange:() => { entrega = e.id; pintar(); } }),
+                el('span', { class:'spacer' }, `${e.icon} ${e.nombre}`, el('div', { class:'tiny dim' }, e.desc)),
+                el('b', { class:'tiny mono' }, e.costo ? plata(e.costo) : 'gratis'))) ]
+          : el('div', { class:'tiny dim' }, 'Cada tienda cobra su envío (ya está sumado) y te pasamos su número de seguimiento.'),
 
         el('hr', { class:'rule' }),
         el('div', { class:'kicker' }, 'Cómo pagás'),
@@ -158,15 +176,16 @@ export function vistaCarrito(ir){
         el('div', { class:'tiny dim' }, `Recibís Factura ${comp.letra} por la gestión. `,
           el('a', { href:'#', style:{ color:'var(--win-tx)' }, onclick:e => { e.preventDefault(); verComprobante(comp); } }, 'Ver detalle')),
 
-        el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => confirmar(items, total, comp, ir, entrega, pago) },
-          ic('check'), 'Pagar todo junto'),
+        el('button', { class:'btn btn-lg btn-win btn-block', onclick:e => iniciarCompra(e.currentTarget, {
+            items, total, comp, ir, entrega, pago, modalidad, costoEntrega, envioTiendas:resumen.envio, repintar:pintar }) },
+          ic('check'), 'Confirmar pedido'),
         el('div', { class:'tiny dim center' },
-          'Pagás una sola vez acá. Compramos en cada tienda por vos y te mandamos todo junto.')));
+          'Todavía no se cobra dentro de la app: al confirmar te contactamos para el pago. Cuando se acredita, compramos en cada tienda por vos.')));
 
     cuerpo.replaceChildren(
       el('div', { class:'notice notice-ok', style:{ marginBottom:'14px' } },
         el('b', {}, 'No tenés que entrar a ninguna tienda. '),
-        'Aunque tu carrito tenga cosas de Coto, de Vea y de La Anónima, pagás una sola vez acá: nosotros compramos en cada una por vos, juntamos todo y te lo mandamos en un solo envío.'),
+        'Aunque tu carrito tenga cosas de varias tiendas, confirmás una sola vez acá: nosotros compramos en cada una por vos y seguís cada envío desde Mis compras.'),
       el('div', { class:'row-b', style:{ marginBottom:'14px' } },
         el('div', {}, el('div', { class:'kicker' }, 'Una sola compra, todas las tiendas'), el('h2', {}, 'Tu carrito')),
         el('button', { class:'btn btn-sm', onclick:() => { store.set('carrito', []); pintar(); } }, 'Vaciar')),
@@ -195,15 +214,70 @@ function verComprobante(comp){
     el('div', { class:'notice', style:{ marginTop:'10px' } }, comp.leyenda))});
 }
 
-function confirmar(items, total, comp, ir, entrega, pago){
-  /* Una sola orden, aunque los productos sean de cinco tiendas
-     distintas. El cliente paga acá; nosotros compramos en cada
-     tienda por él y le mandamos todo junto. */
-  const orden = crearOrden({
-    items, totalARS:total, entrega, pago, comprobante:comp,
-    direccion: store.get('usuario')?.direccion || null
-  });
+/* Antes de confirmar: talles elegidos, cuenta abierta y datos completos. */
+async function iniciarCompra(boton, datos){
+  /* Ropa o calzado que quedó en el carrito de antes de que la app pidiera talle */
+  const sinTalle = datos.items.find(i => !i.variante && necesitaTalle(i));
+  if (sinTalle){
+    toast(`Falta elegir el talle de "${sinTalle.titulo.slice(0, 40)}": sacalo del carrito y agregalo con su talle`, 'bad');
+    datos.ir(`#/producto/${encodeURIComponent(sinTalle.titulo)}`);
+    return;
+  }
+  boton.disabled = true;
+  try{
+    const perfil = await asegurarCuenta();
+    if (perfil) revisar(perfil, datos);
+  } finally { boton.disabled = false; }
+}
 
+function revisar(perfil, datos){
+  const { items, total, comp, entrega, pago, modalidad, costoEntrega, envioTiendas } = datos;
+  const tiendas = [...new Set(items.map(i => STORE_BY_ID[i.tiendaId]?.nombre || i.tiendaId))];
+  const dato = (k, v) => el('div', { class:'cost-line' }, el('span', { class:'lbl' }, k), el('span', { class:'tiny', style:{ textAlign:'right' } }, v));
+  let mandato = false;
+
+  const boton = el('button', { class:'btn btn-lg btn-win btn-block', onclick: async () => {
+    if (!mandato) return toast('Tenés que autorizarnos a comprar en tu nombre', 'bad');
+    boton.disabled = true; boton.textContent = 'Confirmando…';
+    try{
+      /* Una sola orden, aunque los productos sean de cinco tiendas distintas. */
+      const orden = await crearOrden({
+        items, totalARS:total, pago, modalidad, costoEntrega, envioTiendas,
+        entrega: modalidad === 'consolidado' ? entrega : null,
+        comprobante:{ ...comp, cliente:{ nombre:nombreFactura(perfil), cuit:perfil.cuit } }
+      });
+      h.cerrar();
+      terminar(orden, datos);
+    }catch(e){
+      toast(e.message || 'No se pudo confirmar el pedido', 'bad');
+      boton.disabled = false; boton.textContent = 'Confirmar pedido';
+    }
+  } }, 'Confirmar pedido');
+
+  const h = hoja({ titulo:'Revisá y confirmá', ancho:580, cuerpo:el('div', { class:'col' },
+    el('div', { class:'card' },
+      el('div', { class:'kicker', style:{ marginBottom:'6px' } }, 'Entrega'),
+      dato('Cómo', MODALIDADES[modalidad].nombre),
+      dato('Dónde', domicilioTexto(perfil.domicilio)),
+      dato('Recibe', `${nombreCompleto(perfil)} · DNI ${perfil.dni} · ${perfil.telefono}`)),
+    el('div', { class:'card' },
+      el('div', { class:'kicker', style:{ marginBottom:'6px' } }, 'Facturación'),
+      dato('A nombre de', nombreFactura(perfil)),
+      dato('CUIT / CUIL', formatoCuit(perfil.cuit)),
+      dato('Condición', PERFILES[perfil.perfilFiscal]?.label || perfil.perfilFiscal),
+      el('div', { class:'tiny dim', style:{ marginTop:'6px' } },
+        `Cada tienda factura su producto con estos datos; NiJu te hace Factura ${comp.letra} solo por la gestión.`)),
+    el('a', { href:'#/cuenta', class:'tiny', onclick:() => h.cerrar() }, 'Cambiar mis datos'),
+    el('div', { class:'row-b' },
+      el('span', { class:'tiny' }, `${items.reduce((a, i) => a + i.cant, 0)} productos de ${tiendas.join(', ')}`),
+      el('b', { class:'price price-lg' }, plata(total))),
+    el('label', { class:'switch' },
+      el('input', { type:'checkbox', onchange:e => mandato = e.target.checked }),
+      el('span', { class:'tiny' }, `Autorizo a NiJu a comprar estos productos en mi nombre en ${tiendas.join(', ')}.`)),
+    boton) });
+}
+
+function terminar(orden, { items, total, comp, ir, repintar }){
   store.push('comprasAnio', {
     fecha:Date.now(), ordenId:orden.id,
     titulo:items.map(i => i.titulo).slice(0,2).join(' + ') + (items.length > 2 ? ` +${items.length - 2}` : ''),
@@ -213,11 +287,14 @@ function confirmar(items, total, comp, ir, entrega, pago){
     valorUSD:items.reduce((a,i) => a + aUSD(i.precio, i.moneda) * i.cant, 0), destino:'uso'
   });
   store.set('carrito', []);
+  repintar?.();
+  window.dispatchEvent(new Event('niju:avisos'));
 
-  hoja({ titulo:'Listo, nos encargamos nosotros', ancho:560, cuerpo: el('div', { class:'col' },
+  const consolidado = orden.modalidad === 'consolidado';
+  const h = hoja({ titulo:'Listo, pedido confirmado', ancho:560, cuerpo: el('div', { class:'col' },
     el('div', { class:'notice notice-ok' },
-      el('b', {}, `Orden ${orden.id} confirmada. `),
-      'Pagaste una sola vez. A partir de acá compramos nosotros en cada tienda, juntamos todo y te lo mandamos.'),
+      el('b', {}, `Pedido ${orden.id} confirmado. `),
+      'Te contactamos para coordinar el pago. Apenas se acredite, compramos en cada tienda por vos.'),
     el('div', { class:'kicker', style:{ marginTop:'6px' } }, 'Qué hacemos ahora'),
     ...orden.tramos.map((t, i) => el('div', { class:'step' },
       el('span', { class:'step-n' }, String(i + 1)),
@@ -226,11 +303,13 @@ function confirmar(items, total, comp, ir, entrega, pago){
         el('div', { class:'tiny dim' }, `${t.lineas.reduce((a,l) => a + l.cant, 0)} producto(s)`)))),
     el('div', { class:'step' },
       el('span', { class:'step-n' }, String(orden.tramos.length + 1)),
-      el('div', {}, el('b', { class:'tiny' }, 'Juntamos todo en un solo envío'),
-        el('div', { class:'tiny dim' }, 'No te llegan cinco paquetes distintos: te llega uno.'))),
+      el('div', {}, el('b', { class:'tiny' }, consolidado ? 'Juntamos todo en un solo envío' : 'Cada tienda te lo despacha'),
+        el('div', { class:'tiny dim' }, consolidado
+          ? 'No te llegan cinco paquetes distintos: te llega uno.'
+          : 'En Mis compras vas a ver el número de seguimiento de cada tienda.'))),
     el('div', { class:'notice' },
       el('b', {}, 'Si algo cambia, te preguntamos. '),
       'Si un precio sube más del 5% o algo se quedó sin stock, te avisamos antes de comprar y decidís vos. Si no aceptás, te devolvemos esa parte.'),
-    el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => { ir('#/cuenta'); location.reload(); } },
-      'Ver el estado de mi orden')) });
+    el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => { h.cerrar(); ir('#/compras'); } },
+      'Seguir mi compra')) });
 }

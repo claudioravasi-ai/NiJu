@@ -21,6 +21,11 @@
      GET  /v1/demanda              ← bolsa de demanda
      POST /v1/demanda              ← publicar una demanda
      POST /v1/demanda/:id/ofertar  ← un proveedor se ofrece a llenarla
+     GET  /v1/estado               ← qué tiene encendido el servidor (base, cuentas, emails)
+     GET  /v1/variantes?tienda=&id=&url=   ← talles, colores y stock de un producto
+     POST /v1/clientes/registro · POST /v1/clientes/entrar · GET/PUT /v1/clientes/yo
+     GET/POST /v1/ordenes · GET/PUT /v1/ordenes/:id · POST /v1/ordenes/:id/responder
+     GET  /v1/lotes · PUT /v1/lotes/:id    ← compras hechas en cada tienda (solo el dueño)
 
    Variables de entorno (Settings → Variables, como "Secret"):
      EBAY_CLIENT_ID, EBAY_CLIENT_SECRET
@@ -39,12 +44,17 @@ export default {
     const url = new URL(req.url);
     const cors = corsHeaders(req, env);
 
-    if (req.method === 'OPTIONS') return new Response(null, { headers:{ ...cors, 'Access-Control-Allow-Methods':'GET,POST,OPTIONS' } });
+    if (req.method === 'OPTIONS') return new Response(null, { headers:{ ...cors, 'Access-Control-Allow-Methods':'GET,POST,PUT,OPTIONS' } });
     if (url.pathname === '/v1/admin/verificar')   return verificarAdmin(req, env, cors);
     if (url.pathname.startsWith('/v1/campanias')) return campanias(req, url, env, cors);
     if (url.pathname.startsWith('/v1/demanda'))   return demanda(req, url, env, cors);
 
     try{
+      if (url.pathname === '/v1/estado')           return estadoServidor(env, cors);
+      if (url.pathname.startsWith('/v1/clientes')) return await rutaClientes(req, url, env, cors);
+      if (url.pathname.startsWith('/v1/ordenes'))  return await rutaOrdenes(req, url, env, ctx, cors);
+      if (url.pathname.startsWith('/v1/lotes'))    return await rutaLotes(req, url, env, cors);
+      if (url.pathname === '/v1/variantes')        return await variantes(url, env, ctx, cors);
       if (url.pathname === '/v1/tiendas')  return json({ tiendas:Object.keys(ADAPTADORES) }, cors);
       if (url.pathname.startsWith('/v1/salud/')) return salud(url.pathname.split('/').pop(), env, cors);
       if (url.pathname === '/v1/buscar')   return buscar(url, env, ctx, cors);
@@ -64,8 +74,8 @@ function corsHeaders(req, env){
   const ok = permitidos.includes('*') || permitidos.includes(origen);
   return {
     'Access-Control-Allow-Origin': ok ? (origen || '*') : 'null',
-    'Access-Control-Allow-Methods': 'GET,OPTIONS',
-    'Access-Control-Allow-Headers': 'accept,content-type,x-niju-admin',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'accept,content-type,x-niju-admin,authorization',
     'Cache-Control': `public, max-age=${TTL}`
   };
 }
@@ -150,6 +160,469 @@ function verificarAdmin(req, env, cors){
   }
   const ok = esDueno(req, env);
   return new Response(JSON.stringify({ ok }), { status: ok ? 200 : 403, headers });
+}
+
+/* ============================================================
+   ESTADO — qué tiene encendido el servidor
+   La app lo pregunta al arrancar. Si no hay base de datos lo dice
+   con todas las letras, en vez de hacer como que guardó un pedido.
+   ============================================================ */
+const sinCache = cors => ({ ...cors, 'Cache-Control':'no-store' });
+const secretoSesion = env => env.SESION_SECRETO || env.ADMIN_TOKEN || '';
+
+function estadoServidor(env, cors){
+  return json({
+    ok:true, version:2,
+    base: !!env.NIJU,
+    cuentas: !!(env.NIJU && secretoSesion(env)),
+    emails: !!(env.RESEND_API_KEY && env.AVISOS_DESDE)
+  }, sinCache(cors));
+}
+
+/* ---------- utilidades de KV y de cifrado ---------- */
+async function leerKV(env, clave){
+  const t = await env.NIJU.get(clave);
+  return t ? JSON.parse(t) : null;
+}
+const grabarKV = (env, clave, valor, opciones) => env.NIJU.put(clave, JSON.stringify(valor), opciones);
+
+async function clavesKV(env, prefijo){
+  const out = [];
+  let cursor;
+  do{
+    const r = await env.NIJU.list({ prefix:prefijo, cursor });
+    out.push(...r.keys.map(k => k.name));
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+  return out;
+}
+
+const bytes = s => new TextEncoder().encode(s);
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const desdeB64u = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
+
+/* ============================================================
+   CUENTAS DE CLIENTES
+   Para comprar hay que tener cuenta con datos de filiación y
+   fiscales: NiJu compra a nombre del cliente, la tienda factura y
+   despacha con esos datos, y ARCA los pide.
+   La clave NUNCA se guarda: se guarda un derivado PBKDF2 con sal
+   propia. La sesión es un token firmado con HMAC que vence a los
+   30 días. Ocho intentos fallidos traban el email 15 minutos.
+   ============================================================ */
+const DIAS_SESION = 30;
+
+async function derivarClave(clave, sal){
+  const base = await crypto.subtle.importKey('raw', bytes(clave), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name:'PBKDF2', hash:'SHA-256', salt:bytes(sal), iterations:100000 }, base, 256);
+  return b64u(bits);
+}
+
+async function firmar(datos, env){
+  const k = await crypto.subtle.importKey('raw', bytes(secretoSesion(env)), { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
+  return b64u(await crypto.subtle.sign('HMAC', k, bytes(datos)));
+}
+
+async function emitirToken(email, env){
+  const cuerpo = b64u(bytes(JSON.stringify({ e:email, v:Date.now() + DIAS_SESION * 864e5 })));
+  return cuerpo + '.' + await firmar(cuerpo, env);
+}
+
+async function clienteDe(req, env){
+  const h = req.headers.get('authorization') || '';
+  const [cuerpo, firma] = (h.startsWith('Bearer ') ? h.slice(7) : '').split('.');
+  if (!cuerpo || !firma || !secretoSesion(env)) return null;
+  if (!igualSeguro(firma, await firmar(cuerpo, env))) return null;
+  let d;
+  try{ d = JSON.parse(desdeB64u(cuerpo)); }catch{ return null; }
+  if (!d.e || Date.now() > d.v) return null;
+  return leerKV(env, 'cliente:' + d.e);
+}
+
+function cuitValido(c){
+  const s = String(c || '').replace(/\D/g, '');
+  if (s.length !== 11) return false;
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const suma = pesos.reduce((a, p, i) => a + p * +s[i], 0);
+  let v = 11 - (suma % 11);
+  if (v === 11) v = 0;
+  return v !== 10 && v === +s[10];
+}
+
+function edad(f){
+  const n = new Date(f + 'T00:00:00Z');
+  if (isNaN(n)) return 0;
+  const h = new Date();
+  let a = h.getUTCFullYear() - n.getUTCFullYear();
+  if (h.getUTCMonth() < n.getUTCMonth() || (h.getUTCMonth() === n.getUTCMonth() && h.getUTCDate() < n.getUTCDate())) a--;
+  return a;
+}
+
+function limpiarPerfil(p = {}, email){
+  const s = (v, n = 120) => String(v ?? '').trim().slice(0, n);
+  const d = p.domicilio || {};
+  return {
+    nombre:s(p.nombre, 60), apellido:s(p.apellido, 60), dni:s(p.dni, 12).replace(/\D/g, ''),
+    fechaNac:s(p.fechaNac, 10), telefono:s(p.telefono, 30), email,
+    cuit:s(p.cuit, 13).replace(/\D/g, ''), perfilFiscal:s(p.perfilFiscal, 30), razonSocial:s(p.razonSocial, 120),
+    domicilio:{ calle:s(d.calle, 80), numero:s(d.numero, 10), piso:s(d.piso, 20), localidad:s(d.localidad, 60),
+                provincia:s(d.provincia, 60), cp:s(d.cp, 10).toUpperCase(), referencias:s(d.referencias, 200) },
+    canales: Array.isArray(p.canales) ? p.canales.filter(x => typeof x === 'string').slice(0, 5) : ['email'],
+    aceptaTerminos: p.aceptaTerminos ? (Number(p.aceptaTerminos) || Date.now()) : null,
+    aceptaMarketing: !!p.aceptaMarketing
+  };
+}
+
+function problemasPerfil(p){
+  const f = [];
+  const vacio = v => !String(v ?? '').trim();
+  const d = p?.domicilio || {};
+  if (vacio(p?.nombre)) f.push('nombre');
+  if (vacio(p?.apellido)) f.push('apellido');
+  if (!/^\d{7,8}$/.test(String(p?.dni || ''))) f.push('DNI');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p?.fechaNac || ''))) f.push('fecha de nacimiento');
+  else if (edad(p.fechaNac) < 18) f.push('ser mayor de 18 años');
+  if (String(p?.telefono || '').replace(/\D/g, '').length < 8) f.push('teléfono');
+  if (!cuitValido(p?.cuit)) f.push('CUIT/CUIL válido');
+  if (vacio(p?.perfilFiscal)) f.push('condición ante ARCA');
+  for (const [k, n] of [['calle','calle'], ['numero','número'], ['localidad','localidad'], ['provincia','provincia']])
+    if (vacio(d[k])) f.push(n);
+  if (!/^(\d{4}|[A-Z]\d{4}[A-Z]{3})$/.test(String(d.cp || ''))) f.push('código postal');
+  if (!p?.aceptaTerminos) f.push('aceptar los términos');
+  return f;
+}
+
+async function rutaClientes(req, url, env, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
+  if (!secretoSesion(env)) return json({ error:'falta cargar SESION_SECRETO (o ADMIN_TOKEN) en Cloudflare' }, h, 501);
+  const accion = url.pathname.split('/').filter(Boolean)[2];      // registro | entrar | yo
+  const cuerpo = req.method === 'GET' ? {} : await req.json().catch(() => ({}));
+  const email = String(cuerpo.email || '').trim().toLowerCase().slice(0, 120);
+
+  if (accion === 'registro' && req.method === 'POST'){
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return json({ error:'El email no es válido.' }, h, 400);
+    if (String(cuerpo.clave || '').length < 8) return json({ error:'La clave tiene que tener al menos 8 caracteres.' }, h, 400);
+    if (await env.NIJU.get('cliente:' + email)) return json({ error:'Ya hay una cuenta con ese email. Entrá con tu clave.' }, h, 409);
+    const perfil = limpiarPerfil(cuerpo.perfil, email);
+    const faltan = problemasPerfil(perfil);
+    if (faltan.length) return json({ error:'Faltan datos: ' + faltan.join(', ') + '.', faltan }, h, 400);
+    const sal = crypto.randomUUID();
+    await grabarKV(env, 'cliente:' + email, { email, perfil, sal, hash:await derivarClave(cuerpo.clave, sal), creado:Date.now() });
+    return json({ ok:true, token:await emitirToken(email, env), perfil }, h);
+  }
+
+  if (accion === 'entrar' && req.method === 'POST'){
+    const claveIntentos = 'intentos:' + email;
+    const intentos = +(await env.NIJU.get(claveIntentos) || 0);
+    if (intentos >= 8) return json({ error:'Demasiados intentos. Probá de nuevo en 15 minutos.' }, h, 429);
+    const c = await leerKV(env, 'cliente:' + email);
+    const ok = c && igualSeguro(await derivarClave(String(cuerpo.clave || ''), c.sal), c.hash);
+    if (!ok){
+      await env.NIJU.put(claveIntentos, String(intentos + 1), { expirationTtl:900 });
+      return json({ error:'Email o clave incorrectos.' }, h, 403);
+    }
+    if (intentos) await env.NIJU.delete(claveIntentos);
+    return json({ ok:true, token:await emitirToken(email, env), perfil:c.perfil }, h);
+  }
+
+  if (accion === 'yo'){
+    const c = await clienteDe(req, env);
+    if (!c) return json({ error:'La sesión venció. Volvé a entrar.' }, h, 401);
+    if (req.method === 'GET') return json({ ok:true, perfil:c.perfil }, h);
+    if (req.method === 'PUT'){
+      const perfil = limpiarPerfil({ ...c.perfil, ...(cuerpo.perfil || {}) }, c.email);
+      const faltan = problemasPerfil(perfil);
+      if (faltan.length) return json({ error:'Faltan datos: ' + faltan.join(', ') + '.', faltan }, h, 400);
+      await grabarKV(env, 'cliente:' + c.email, { ...c, perfil });
+      return json({ ok:true, perfil }, h);
+    }
+  }
+  return json({ error:'ruta desconocida' }, h, 404);
+}
+
+/* ============================================================
+   ÓRDENES — la base de datos de las compras
+   Tiene que vivir acá: si queda en el navegador del cliente, el
+   dueño no la ve; si queda en el del dueño, el cliente no puede
+   seguir su pedido.
+   Claves: orden:<id> · cliord:<email> (índice del cliente)
+   ============================================================ */
+const TEXTO_RESPUESTA = {
+  acepto:'El cliente aceptó el cambio',
+  cancelo:'El cliente pidió cancelar',
+  arrepentimiento:'El cliente usó el botón de arrepentimiento',
+  consulta:'Consulta del cliente'
+};
+
+function puedeArrepentirse(o){
+  if (o.estado === 'cancelada') return false;
+  const entrega = (o.historia || []).filter(x => x.estado === 'entregada').at(-1)?.ts || 0;
+  return Date.now() - Math.max(o.creada, entrega) <= 10 * 864e5;
+}
+
+/* Une dos listas por una clave. Lo nuevo pisa a lo viejo, pero nada
+   de lo viejo se pierde: el dueño puede estar guardando una copia que
+   todavía no tiene lo último que respondió el cliente. */
+function unir(viejos = [], nuevos = [], clave){
+  const m = new Map();
+  for (const x of viejos) m.set(clave(x), x);
+  for (const x of nuevos) m.set(clave(x), { ...m.get(clave(x)), ...x });
+  return [...m.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+}
+
+async function rutaOrdenes(req, url, env, ctx, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
+  const [, , id, accion] = url.pathname.split('/').filter(Boolean);
+  const dueno = esDueno(req, env);
+  const cliente = dueno ? null : await clienteDe(req, env);
+  if (!dueno && !cliente) return json({ error:'Entrá con tu cuenta para ver tus compras.' }, h, 401);
+
+  if (req.method === 'GET' && !id){
+    const claves = dueno ? await clavesKV(env, 'orden:')
+                         : ((await leerKV(env, 'cliord:' + cliente.email)) || []).map(x => 'orden:' + x);
+    const os = (await Promise.all(claves.map(k => leerKV(env, k)))).filter(Boolean);
+    return json({ ordenes:os.sort((a, b) => b.creada - a.creada) }, h);
+  }
+
+  if (req.method === 'POST' && !id){
+    if (!cliente) return json({ error:'La orden la crea el cliente desde su cuenta.' }, h, 403);
+    const faltan = problemasPerfil(cliente.perfil);
+    if (faltan.length) return json({ error:'Completá tus datos antes de comprar: ' + faltan.join(', ') + '.' }, h, 400);
+    const o = (await req.json().catch(() => ({}))).orden || {};
+    if (!Array.isArray(o.tramos) || !o.tramos.length || o.tramos.length > 30)
+      return json({ error:'La orden no tiene productos.' }, h, 400);
+    const p = cliente.perfil;
+    const ahora = Date.now();
+    const orden = {
+      ...o,
+      id:'OR-' + ahora.toString(36).toUpperCase() + '-' + crypto.randomUUID().slice(0, 4).toUpperCase(),
+      creada:ahora,
+      cliente:{ email:cliente.email, nombre:`${p.nombre} ${p.apellido}`.trim(), dni:p.dni, cuit:p.cuit,
+                telefono:p.telefono, perfilFiscal:p.perfilFiscal, razonSocial:p.razonSocial || null },
+      direccion:{ ...p.domicilio },
+      estado:'pendiente_pago',
+      historia:[{ ts:ahora, estado:'pendiente_pago', nota:'Pedido recibido. Falta acreditar el pago.' }],
+      avisos:[], respuestas:[]
+    };
+    await grabarKV(env, 'orden:' + orden.id, orden);
+    const indice = (await leerKV(env, 'cliord:' + cliente.email)) || [];
+    await grabarKV(env, 'cliord:' + cliente.email, [...indice, orden.id]);
+    avisarPorEmail(env, ctx, orden, [{ titulo:'Recibimos tu pedido ' + orden.id,
+      texto:'Te contactamos para coordinar el pago. Apenas se acredite, salimos a comprar en cada tienda.' }]);
+    return json({ ok:true, orden }, h);
+  }
+
+  const o = id ? await leerKV(env, 'orden:' + id) : null;
+  if (!o || (!dueno && o.cliente?.email !== cliente.email)) return json({ error:'orden inexistente' }, h, 404);
+
+  if (req.method === 'GET') return json({ ok:true, orden:o }, h);
+
+  if (req.method === 'PUT'){
+    if (!dueno) return json({ error:'no autorizado' }, h, 403);
+    const nueva = (await req.json().catch(() => ({}))).orden || {};
+    /* Lo que identifica la orden y al cliente no se reescribe desde afuera,
+       y lo que dijo o leyó el cliente tampoco se pisa. */
+    const avisos = unir(o.avisos, nueva.avisos, a => a.id).map(a =>
+      ({ ...a, leido: a.leido || !!(o.avisos || []).find(b => b.id === a.id)?.leido }));
+    const guardada = { ...nueva, id:o.id, creada:o.creada, cliente:o.cliente, avisos,
+      historia:unir(o.historia, nueva.historia, x => x.ts + '|' + x.nota),
+      respuestas:unir(o.respuestas, nueva.respuestas, x => x.ts + '|' + x.tipo) };
+    const nuevos = avisos.filter(a => !(o.avisos || []).some(b => b.id === a.id));
+    await grabarKV(env, 'orden:' + o.id, guardada);
+    if (nuevos.length) avisarPorEmail(env, ctx, guardada, nuevos);
+    return json({ ok:true, orden:guardada }, h);
+  }
+
+  if (req.method === 'POST' && accion === 'responder'){
+    if (!cliente) return json({ error:'solo responde el cliente' }, h, 403);
+    const { tipo, nota, lineaId } = await req.json().catch(() => ({}));
+    if (tipo === 'leido'){
+      o.avisos = (o.avisos || []).map(a => ({ ...a, leido:true }));
+    } else if (TEXTO_RESPUESTA[tipo]){
+      if (tipo === 'arrepentimiento' && !puedeArrepentirse(o))
+        return json({ error:'El plazo de 10 días para arrepentirte ya pasó.' }, h, 400);
+      const texto = String(nota || '').slice(0, 500);
+      const ts = Date.now();
+      o.respuestas = [...(o.respuestas || []), { ts, tipo, lineaId:lineaId || null, nota:texto, atendida:false }];
+      o.historia = [...(o.historia || []), { ts, estado:o.estado, de:'cliente', nota:TEXTO_RESPUESTA[tipo] + (texto ? ': ' + texto.slice(0, 200) : '.') }];
+    } else return json({ error:'respuesta desconocida' }, h, 400);
+    await grabarKV(env, 'orden:' + o.id, o);
+    return json({ ok:true, orden:o }, h);
+  }
+  return json({ error:'método no permitido' }, h, 405);
+}
+
+/* Compras hechas en cada tienda: un lote puede juntar productos de
+   varios clientes. Solo las ve y las toca el dueño. */
+async function rutaLotes(req, url, env, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
+  if (!esDueno(req, env)) return json({ error:'no autorizado' }, h, 403);
+  const id = url.pathname.split('/').filter(Boolean)[2];
+  if (req.method === 'GET'){
+    const ls = (await Promise.all((await clavesKV(env, 'lote:')).map(k => leerKV(env, k)))).filter(Boolean);
+    return json({ lotes:ls.sort((a, b) => b.creado - a.creado) }, h);
+  }
+  if (req.method === 'PUT' && id){
+    const lote = (await req.json().catch(() => ({}))).lote;
+    if (!lote || lote.id !== id) return json({ error:'lote inválido' }, h, 400);
+    await grabarKV(env, 'lote:' + id, lote);
+    return json({ ok:true, lote }, h);
+  }
+  return json({ error:'método no permitido' }, h, 405);
+}
+
+/* Aviso por email. Solo si se cargó RESEND_API_KEY y AVISOS_DESDE
+   (un remitente de un dominio verificado en resend.com). Sin eso, el
+   cliente igual ve cada novedad dentro de la app. */
+function avisarPorEmail(env, ctx, orden, avisos){
+  const para = orden.cliente?.email;
+  if (!env.RESEND_API_KEY || !env.AVISOS_DESDE || !para || !avisos.length) return;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+  const bloques = avisos.map(a => {
+    const u = /^https?:\/\//i.test(a.seguimiento?.url || '') ? a.seguimiento.url : '';
+    return `<h3 style="margin:0 0 4px">${esc(a.titulo)}</h3><p style="margin:0 0 14px">${esc(a.texto)}</p>` +
+           (u ? `<p style="margin:0 0 14px"><a href="${esc(u)}">Seguir el envío</a></p>` : '');
+  }).join('');
+  const pie = `Pedido ${esc(orden.id)} · NiJu` + (env.APP_URL ? ` · <a href="${esc(env.APP_URL)}#/compras">Ver mis compras</a>` : '');
+  ctx.waitUntil(fetch('https://api.resend.com/emails', {
+    method:'POST',
+    headers:{ Authorization:'Bearer ' + env.RESEND_API_KEY, 'content-type':'application/json' },
+    body:JSON.stringify({
+      from:env.AVISOS_DESDE, to:[para],
+      subject: avisos.length === 1 ? avisos[0].titulo : `Novedades de tu pedido ${orden.id}`,
+      html:`<div style="font-family:Arial,sans-serif;font-size:15px;color:#333">${bloques}<p style="color:#999;font-size:12px">${pie}</p></div>`
+    })
+  }).catch(() => {}));
+}
+
+/* ============================================================
+   VARIANTES — talles, colores y medidas
+   La ropa y el calzado no se pueden comprar sin elegir el talle, y
+   cada talle tiene su propio stock (y a veces su propio precio).
+   Leemos lo mismo que muestra la ficha de la tienda:
+     · VTEX    → items del producto, con stock por talle
+     · Shopify → /products/<handle>.js, con disponibilidad por variante
+     · Woo     → variaciones del producto (sin stock por variación)
+   Devolvemos también el código de cada variante (sku): con eso el
+   dueño abre el carrito de la tienda ya cargado con todo junto.
+   ============================================================ */
+async function variantes(url, env, ctx, cors){
+  const tienda = url.searchParams.get('tienda');
+  const a = ADAPTADORES[tienda];
+  if (!a) return json({ error:`tienda desconocida: ${tienda}` }, cors, 400);
+  if (!a.variantes) return json({ tienda, soportado:false, opciones:[], skus:[] }, cors);
+
+  const crudo = String(url.searchParams.get('id') || '');
+  const id = crudo.startsWith(tienda + '-') ? crudo.slice(tienda.length + 1) : crudo;
+  const enlace = url.searchParams.get('url') || '';
+  const clave = new Request(`https://cache.niju/variantes/${tienda}?id=${encodeURIComponent(id)}&u=${encodeURIComponent(enlace)}`);
+  /* La simulación de compra pide "fresco": precio y stock de este momento. */
+  if (!url.searchParams.get('fresco')){
+    const hit = await caches.default.match(clave);
+    if (hit) return hit;
+  }
+  try{
+    const d = await a.variantes({ id, url:enlace });
+    const res = json({ tienda, plataforma:a.plataforma, host:a.host, soportado:true, leido:Date.now(),
+                       skus:d.skus, opciones:sinRedundantes(d.opciones, d.skus) },
+                     { ...cors, 'Cache-Control':'public, max-age=120' });
+    ctx.waitUntil(caches.default.put(clave, res.clone()));
+    return res;
+  }catch(e){
+    return json({ tienda, soportado:true, error:String(e.message || e), opciones:[], skus:[] }, sinCache(cors));
+  }
+}
+
+/* Decathlon publica "Model Code" además de "Color": son la misma
+   elección con dos nombres (cada código es un color). Mostrar las dos
+   confunde, así que se saca la del código. */
+function sinRedundantes(opciones = [], skus = []){
+  const determina = (a, b) => {
+    const m = new Map();
+    for (const s of skus){
+      const x = s.valores?.[a], y = s.valores?.[b];
+      if (m.has(x) && m.get(x) !== y) return false;
+      m.set(x, y);
+    }
+    return true;
+  };
+  return opciones.filter(o => {
+    if (/^title$/i.test(o.nombre) || (o.valores.length === 1 && /default title/i.test(o.valores[0]))) return false;
+    if (!/code|c[oó]digo|sku|\bref/i.test(o.nombre)) return true;
+    return !opciones.some(y => y !== o && determina(o.nombre, y.nombre) && determina(y.nombre, o.nombre));
+  });
+}
+
+const CABECERAS_CATALOGO = { accept:'application/json', 'user-agent':'NiJu/0.1 (+contacto@niju.ar)' };
+
+async function variantesVtex(host, id){
+  const d = await pedir(`https://${host}/api/catalog_system/pub/products/search?fq=productId:${encodeURIComponent(id)}`, { headers:CABECERAS_CATALOGO });
+  const p = (d || [])[0];
+  if (!p) throw new Error('la tienda ya no publica ese producto');
+  const ordenTienda = {};
+  for (const e of (p.skuSpecifications || [])) ordenTienda[e.field?.name] = (e.values || []).map(v => v.name);
+  const nombres = [];
+  const skus = (p.items || []).map(it => {
+    const vend = it.sellers?.find(s => s.commertialOffer?.IsAvailable) || it.sellers?.[0];
+    const co = vend?.commertialOffer || {};
+    const valores = {};
+    for (const k of (it.variations || [])){
+      const v = [].concat(it[k] || [])[0];
+      if (v == null) continue;
+      valores[k] = String(v);
+      if (!nombres.includes(k)) nombres.push(k);
+    }
+    const stock = Math.max(0, co.AvailableQuantity || 0);
+    return { sku:String(it.itemId), seller:vend?.sellerId || '1', valores,
+             precio: co.Price > 0 ? co.Price : null, stock,
+             disponible: !!co.IsAvailable && stock > 0,
+             imagen: it.images?.[0]?.imageUrl || null };
+  });
+  const opciones = nombres.map(n => {
+    const orden = ordenTienda[n] || [];
+    const pos = v => { const i = orden.indexOf(v); return i < 0 ? 999 : i; };
+    return { nombre:n, valores:[...new Set(skus.map(s => s.valores[n]).filter(Boolean))].sort((a, b) => pos(a) - pos(b)) };
+  });
+  return { opciones, skus };
+}
+
+async function variantesShopify(host, enlace){
+  const handle = (String(enlace).match(/\/products\/([^/?#]+)/) || [])[1];
+  if (!handle) throw new Error('no vino el link del producto');
+  const p = await pedir(`https://${host}/products/${handle}.js`, { headers:CABECERAS_CATALOGO });
+  const nombres = (p.options || []).map(o => typeof o === 'string' ? o : o.name);
+  const skus = (p.variants || []).map(v => {
+    const valores = {};
+    nombres.forEach((n, i) => { const x = v['option' + (i + 1)]; if (x != null) valores[n] = String(x); });
+    let img = v.featured_image?.src || null;
+    if (img && img.startsWith('//')) img = 'https:' + img;
+    /* Shopify da el precio en centavos: 6220000 son $62.200 */
+    return { sku:String(v.id), seller:null, valores, precio: v.price > 0 ? v.price / 100 : null,
+             stock:null, disponible: v.available !== false, imagen:img };
+  });
+  const opciones = nombres.map((n, i) => ({ nombre:n,
+    valores:(p.options[i]?.values || [...new Set(skus.map(s => s.valores[n]))]).map(String) }));
+  return { opciones, skus };
+}
+
+async function variantesWoo(host, id){
+  const p = await pedir(`https://${host}/wp-json/wc/store/products/${encodeURIComponent(id)}`, { headers:CABECERAS_CATALOGO });
+  if (p.type !== 'variable'){
+    return { opciones:[], skus:[{ sku:String(p.id), seller:null, valores:{}, precio:null, stock:null,
+                                  disponible:p.is_in_stock !== false, imagen:null }] };
+  }
+  const attrs = (p.attributes || []).filter(a => a.has_variations);
+  const attr = n => attrs.find(a => a.taxonomy === n || a.name === n);
+  const skus = (p.variations || []).map(v => ({
+    sku:String(v.id), seller:null, precio:null, stock:null, disponible:null, imagen:null,
+    valores:Object.fromEntries((v.attributes || []).map(x => [
+      attr(x.name)?.name || x.name,
+      (attr(x.name)?.terms || []).find(t => t.slug === x.value)?.name || x.value ]))
+  }));
+  return { opciones:attrs.map(a => ({ nombre:a.name, valores:(a.terms || []).map(t => t.name) })), skus };
 }
 
 async function campanias(req, url, env, cors){
@@ -753,7 +1226,8 @@ const ADAPTADORES = {
    ------------------------------------------------------------------ */
 function woo(id, host, entregaDias){
   return {
-    modo:'catalogo-publico',
+    modo:'catalogo-publico', plataforma:'woo', host,
+    variantes: ({ id:producto }) => variantesWoo(host, producto),
     async buscar({ q, limite, desde = 0 }){
       const porPagina = Math.min(limite, 20);
       const pagina = Math.floor(desde / porPagina) + 1;
@@ -796,7 +1270,8 @@ function woo(id, host, entregaDias){
    ------------------------------------------------------------------ */
 function shopify(id, host, entregaDias){
   return {
-    modo:'catalogo-publico',
+    modo:'catalogo-publico', plataforma:'shopify', host,
+    variantes: ({ url }) => variantesShopify(host, url),
     async buscar({ q, limite, desde = 0 }){
       /* El buscador rápido de Shopify devuelve hasta 10 y no pagina.
          Para ver más hay que entrar a la tienda: preferimos decirlo
@@ -839,7 +1314,8 @@ function shopify(id, host, entregaDias){
 
 function vtex(id, host, entregaDias){
   return {
-    modo:'catalogo-publico',
+    modo:'catalogo-publico', plataforma:'vtex', host,
+    variantes: ({ id:producto }) => variantesVtex(host, producto),
     async buscar({ q, limite, desde = 0 }){
       const u = `https://${host}/api/catalog_system/pub/products/search?ft=${encodeURIComponent(q)}` +
                 `&_from=${desde}&_to=${desde + limite - 1}`;
