@@ -17,6 +17,23 @@ import { vistaOportunidades } from './oportunidades.js';
 import { vistaOperacion } from './ordenes.js';
 import { FX } from '../engine/fx.js';
 
+/* Confirmación de salida dentro de la app. Antes usaba confirm() del
+   navegador: si el navegador bloquea esos cuadros (o la app instalada
+   no los muestra), devolvía "no" sin preguntar y el botón no hacía nada. */
+export function confirmarSalida(){
+  const h = hoja({ titulo:'¿Salir del modo dueño?', ancho:420, cuerpo: el('div', { class:'col' },
+    el('p', { class:'muted' }, 'El Panel y los Conectores dejan de verse. Para volver a entrar, tocá cinco veces el logo NiJu y poné tu clave.'),
+    el('div', { class:'row', style:{ justifyContent:'flex-end', gap:'8px' } },
+      el('button', { class:'btn', onclick:() => h.cerrar() }, 'Cancelar'),
+      el('button', { class:'btn btn-win', onclick:() => {
+        salir();
+        h.cerrar();
+        toast('Saliste del modo dueño');
+        location.hash = '#/';
+        location.reload();
+      } }, 'Salir'))) });
+}
+
 export function vistaPanel(ir){
   const raiz = el('div', { class:'wrap' });
   const cuerpo = el('div');
@@ -40,13 +57,7 @@ export function vistaPanel(ir){
         el('button', {
           class:'btn btn-sm',
           title:'Oculta el Panel y los Conectores hasta que vuelvas a entrar',
-          onclick:() => {
-            if (!confirm('¿Salir del modo dueño?\n\nEl Panel y los Conectores dejan de verse. Para volver a entrar, tocá cinco veces el logo de NiJu y poné tu clave.')) return;
-            salir();
-            toast('Saliste del modo dueño');
-            location.hash = '#/';
-            location.reload();
-          }
+          onclick:() => confirmarSalida()
         }, ic('x'), 'Salir del modo dueño'))),
     tabs, cuerpo));
 

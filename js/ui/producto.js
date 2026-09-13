@@ -15,7 +15,7 @@ import { consecuenciasFiscales, PERFILES } from '../engine/fiscal.js';
 import { aUSD, FX } from '../engine/fx.js';
 import { plazo, PROVINCIAS } from '../engine/envios.js';
 import { store, agregarAlCarrito } from '../state.js';
-import { logoTienda, tagTipo, selloOrigen, esqueleto, barraProgreso, vacio, precioDual, selectorMoneda } from './components.js';
+import { logoTienda, tagTipo, selloOrigen, esqueleto, barraProgreso, vacio, precioDual, selectorMoneda, foto } from './components.js';
 import { precioReal, tablaPerfiles, mejorParaVos, conviendCambiar } from '../engine/precio-fiscal.js';
 import { analizar } from '../engine/historial.js';
 
@@ -55,11 +55,16 @@ function ficha(g, ir){
 
   const box = el('div', { class:'buybox' });
   const tabla = el('div');
+  /* La foto real de la tienda elegida. Antes iba un emoji de caja en su
+     lugar: engañoso, y quedaba un cuadro vacío al entrar a comprar. */
+  const galeria = el('div', { class:'pdp-gal' });
 
   function pintarBuyBox(){
     const o = elegida;
     const t = STORE_BY_ID[o.tiendaId];
     const c = o.costo;
+
+    galeria.replaceChildren(foto({ imagen: o.imagen || g.imagen, titulo: o.titulo || g.titulo }, 'pdp-foto'));
 
     const valorUSD = aUSD(o.precio, o.moneda);
     const fleteUSD = aUSD(o.envio || 0, o.moneda);
@@ -224,11 +229,11 @@ function ficha(g, ir){
       el('span', { class:'tiny dim' }, `${g.tiendas} tiendas comparadas · ahorro de hasta ${plata(g.ahorro)}`)),
     el('div', { class:'pdp' },
       el('div', {},
-        el('div', { class:'pdp-gal' }, g.emo || '📦'),
+        galeria,
         el('h1', { style:{ fontSize:'clamp(21px,3vw,30px)', textTransform:'none', marginTop:'16px' } }, g.titulo),
         el('div', { class:'row wrapf', style:{ margin:'8px 0 16px' } },
-          el('span', { class:'chip' }, g.marca),
-          el('span', { class:'chip' }, g.rubro),
+          g.marca ? el('span', { class:'chip' }, g.marca) : null,
+          g.rubro ? el('span', { class:'chip' }, g.rubro) : null,
           g.ahorroPct ? el('span', { class:'saving' }, `Hasta ${g.ahorroPct}% de diferencia entre tiendas`) : null),
         bloqueHistorial,
         bloqueTuPrecio,

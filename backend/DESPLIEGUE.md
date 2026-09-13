@@ -95,11 +95,13 @@ Sin esto, cada persona ve solo lo suyo y ninguna de las dos cosas funciona.
 
 1. En **Variables and Secrets**, agregá `ADMIN_TOKEN` con una clave larga que
    elijas vos.
-2. En la app, tocá cinco veces el pie del menú lateral (o andá a `#/entrar`) y
-   poné esa misma clave.
+2. Volvé a desplegar el worker (así existe la ruta `/v1/admin/verificar`).
+3. En la app, tocá cinco veces el logo NiJu (o andá a `#/entrar`) y poné esa
+   misma clave.
 
-A partir de ahí, Panel y Conectores solo aparecen en tu dispositivo, y el
-backend rechaza a cualquiera que intente crear campañas sin la clave.
+El servidor verifica la clave antes de abrir el Panel: con cualquier otra no
+se entra. Si `ADMIN_TOKEN` no está cargada, nadie puede entrar como dueño ni
+crear campañas. La sesión dura mientras la app está abierta.
 
 ## D. Mercado Pago — PENDIENTE, y es el que falta para cobrar
 

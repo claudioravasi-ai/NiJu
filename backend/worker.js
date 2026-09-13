@@ -40,6 +40,7 @@ export default {
     const cors = corsHeaders(req, env);
 
     if (req.method === 'OPTIONS') return new Response(null, { headers:{ ...cors, 'Access-Control-Allow-Methods':'GET,POST,OPTIONS' } });
+    if (url.pathname === '/v1/admin/verificar')   return verificarAdmin(req, env, cors);
     if (url.pathname.startsWith('/v1/campanias')) return campanias(req, url, env, cors);
     if (url.pathname.startsWith('/v1/demanda'))   return demanda(req, url, env, cors);
 
@@ -127,8 +128,28 @@ async function buscar(url, env, ctx, cors){
 /* Solo el dueño. La clave viaja en una cabecera y la valida el
    servidor: esconder botones en el navegador no protege nada. */
 function esDueno(req, env){
-  if (!env.ADMIN_TOKEN) return true;      // sin clave configurada, todo abierto (modo prueba)
-  return req.headers.get('x-niju-admin') === env.ADMIN_TOKEN;
+  if (!env.ADMIN_TOKEN) return false;     // sin clave cargada en Cloudflare, nadie es dueño
+  return igualSeguro(req.headers.get('x-niju-admin') || '', env.ADMIN_TOKEN);
+}
+
+/* Compara sin cortar en la primera letra distinta, para que el tiempo
+   de respuesta no dé pistas sobre la clave. */
+function igualSeguro(a, b){
+  if (a.length !== b.length) return false;
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+/* La puerta del dueño en la app pregunta acá antes de abrir el Panel.
+   Nunca se guarda en caché: cada intento se responde en el momento. */
+function verificarAdmin(req, env, cors){
+  const headers = { ...cors, 'Cache-Control':'no-store', 'content-type':'application/json; charset=utf-8' };
+  if (!env.ADMIN_TOKEN){
+    return new Response(JSON.stringify({ ok:false, error:'falta cargar ADMIN_TOKEN en Cloudflare' }), { status:503, headers });
+  }
+  const ok = esDueno(req, env);
+  return new Response(JSON.stringify({ ok }), { status: ok ? 200 : 403, headers });
 }
 
 async function campanias(req, url, env, cors){
@@ -245,6 +266,7 @@ async function demanda(req, url, env, cors){
 
 const TIENDAS_CONOCIDAS = [
   [/(^|\.)mercadolibre\./i,   'meli',       'Mercado Libre', 'ARS', 'nacional'],
+  [/tiendamia\./i,            'tiendamia',  'Tiendamia',     'USD', 'internacional'],
   [/(^|\.)amazon\./i,         'amazon',     'Amazon',        'USD', 'internacional'],
   [/(^|\.)ebay\./i,           'ebay',       'eBay',          'USD', 'internacional'],
   [/aliexpress\./i,           'aliexpress', 'AliExpress',    'USD', 'internacional'],

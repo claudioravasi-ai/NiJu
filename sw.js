@@ -1,6 +1,9 @@
 /* NiJu — Service Worker
-   Cache-first para el armazón, red-primero para los datos. */
-const CACHE = 'niju-v0.1.0';
+   Red primero para todo; la caché es solo para cuando no hay internet.
+   Antes el armazón iba cache-first con un nombre de caché fijo: el
+   teléfono seguía mostrando la versión vieja aunque se subiera una
+   nueva a GitHub. Cambiar CACHE en cada versión fuerza la limpieza. */
+const CACHE = 'niju-v0.1.1';
 const BASE = [
   './', './index.html', './manifest.json',
   './css/core.css', './css/views.css',
@@ -24,10 +27,12 @@ self.addEventListener('fetch', e => {
     return;
   }
   e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-      const copia = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copia));
+    fetch(e.request).then(res => {
+      if (res.ok){
+        const copia = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copia));
+      }
       return res;
-    }).catch(() => caches.match('./index.html')))
+    }).catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
   );
 });

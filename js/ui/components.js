@@ -81,14 +81,52 @@ export function selectorMoneda(alCambiar){
   return cont;
 }
 
+/* ------------------------------------------------------------------
+   Logo de cada tienda.
+   Mostramos el ícono oficial que publica la propia tienda en su sitio
+   (el mismo que ves en la pestaña del navegador), así se reconoce de
+   un vistazo. Si no carga o es el genérico, queda el cuadro de color
+   con las iniciales.
+   ------------------------------------------------------------------ */
+const DOMINIO_TIENDA = {
+  meli:'mercadolibre.com.ar', coto:'cotodigital.com.ar', anonima:'laanonimaonline.com',
+  jumbo:'jumbo.com.ar', carrefour:'carrefour.com.ar', easy:'easy.com.ar', sodimac:'sodimac.com.ar',
+  fravega:'fravega.com', musimundo:'musimundo.com', compragamer:'compragamer.com',
+  farmacity:'farmacity.com', dexter:'dexter.com.ar', tiendanube:'tiendanube.com',
+  vea:'vea.com.ar', disco:'disco.com.ar', cetrogar:'cetrogar.com.ar', masonline:'masonline.com.ar',
+  sportotal:'sportotal.com.ar', decathlon:'decathlon.com.ar', reebok:'reebok.com.ar',
+  timberland:'timberland.com.ar', ansilta:'ansilta.com.ar', c47street:'47street.com.ar',
+  mimo:'mimo.com.ar', topper:'topper.com.ar', portsaid:'portsaid.com.ar',
+  desiderata:'desiderata.com.ar', tascani:'tascani.com.ar', legacy:'legacy.com.ar',
+  sportline:'sportline.com.ar', cebra:'cebra.com.ar', juleriaque:'juleriaque.com.ar',
+  puppis:'puppis.com.ar', cuspide:'cuspide.com',
+  tiendamia:'tiendamia.com', amazon:'amazon.com', ebay:'ebay.com', aliexpress:'aliexpress.com', alibaba:'alibaba.com',
+  '1688':'1688.com', temu:'temu.com', shein:'shein.com', walmart:'walmart.com',
+  bestbuy:'bestbuy.com', etsy:'etsy.com', dhgate:'dhgate.com', tiktokshop:'tiktok.com',
+  instagram:'instagram.com', fbmarket:'facebook.com', whatsapp:'whatsapp.com'
+};
+
 export function logoTienda(tiendaId, grande = false){
   const t = STORE_BY_ID[tiendaId];
   if (!t) return el('div', { class:'slogo', style:{ background:'#444' } }, '?');
-  return el('div', {
+  const iniciales = el('div', {
     class: 'slogo' + (grande ? ' slogo-lg' : ''),
     style: { background:t.color, color: esClaro(t.color) ? '#0a0a0a' : '#fff' },
     title: t.nombre
   }, t.abbr);
+
+  const dominio = DOMINIO_TIENDA[tiendaId];
+  if (!dominio) return iniciales;
+
+  const img = el('img', { alt:t.nombre, loading:'lazy', decoding:'async', referrerpolicy:'no-referrer',
+                          src:`https://www.google.com/s2/favicons?domain=${dominio}&sz=128` });
+  const conLogo = el('div', { class:'slogo slogo-img' + (grande ? ' slogo-lg' : ''), title:t.nombre }, img);
+  /* El servicio devuelve un globito de 16 px cuando la tienda no tiene
+     ícono: eso no identifica a nadie, así que volvemos a las iniciales. */
+  const volver = () => conLogo.replaceWith(iniciales);
+  img.addEventListener('error', volver);
+  img.addEventListener('load', () => { if (img.naturalWidth < 32) volver(); });
+  return conLogo;
 }
 
 function esClaro(hex){

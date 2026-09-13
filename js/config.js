@@ -8,25 +8,9 @@ export const CONFIG = {
   version: '0.1.0',
 
   /* ---------------- Identidad visual ----------------
-     Dos piezas distintas, y conviene no confundirlas:
-
-     · isotipo : el dibujo. Va chiquito, al lado del nombre. Si es una
-       ilustración a color (no una marca de una línea), tiene que ir
-       adentro de un cuadrado redondeado o se ve sucio sobre el amarillo.
-     · logo    : la marca completa de una sola línea. Se usa sola, sin
-       texto al lado, y toma el color del fondo.
-
-     Para usar tu ilustración: guardá el archivo en assets/isotipo.png
-     y dejá `isotipo` apuntando ahí. */
-  /* El dibujo. Probamos varios formatos: guardalo como quieras
-     (jpg, png, webp) con el nombre "isotipo" dentro de assets/ */
-  isotipo: ['./assets/isotipo.jpg', './assets/isotipo.jpeg',
-            './assets/isotipo.png', './assets/isotipo.webp'],
-  isotipoTexto: 'NiJu',              // la palabra que va al lado
-  /* Encuadre del dibujo cuando va chiquito. Subí el zoom para acercarte
-     y movés el foco en porcentajes (izquierda-derecha, arriba-abajo). */
-  isotipoZoom: '205%',
-  isotipoFoco: '27% 56%',
+     El logo de la cabecera y del menú (emblema de bolsa + "NiJu") está
+     dibujado en vector dentro de js/app.js, en EMBLEMA_SVG. El isotipo
+     del pez se sacó: a 30 píxeles no se reconocía. */
   logo: './assets/logo-niju.svg',    // marca de una línea, para cuando va sola
   logoInvertir: false,
 

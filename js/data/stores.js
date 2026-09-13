@@ -187,6 +187,17 @@ export const STORES = [
     checkout:'redirect', comision:0, envioDias:[3,8], envioBase:4200, reputacion:4.3, cuotas:0 },
 
   /* ---------------- INTERNACIONALES ---------------- */
+  /* Tiendamia no es una tienda sino un intermediario: compra en tiendas
+     de EE.UU. (Amazon, eBay, Walmart y otras) y entrega en Argentina con
+     el precio final. Es competencia directa de la compra asistida de NiJu.
+     Sin API pública conocida. Plazos, costos y reputación quedan sin
+     cargar a propósito: no se inventan. */
+  { id:'tiendamia', nombre:'Tiendamia', abbr:'TM', color:'#E4032E', tipo:'internacional', pais:'US', moneda:'USD',
+    rubros:['tecnologia','celulares','electro','hogar','moda','deportes','juguetes','belleza','gaming','bebes','salud','libros'],
+    integracion:{ modo:'scraping', estado:'pendiente',
+      notas:'Intermediario de compras en EE.UU. con entrega en AR. Sin API pública: por ahora solo el resolver lee sus links ("Traelo por mí"). Para precios en vivo hace falta convenio o un conector propio.' },
+    checkout:'redirect', comision:0 },
+
   { id:'amazon', nombre:'Amazon', abbr:'AZ', color:'#FF9900', tipo:'internacional', pais:'US', moneda:'USD',
     rubros:['tecnologia','celulares','electro','hogar','moda','deportes','libros','juguetes','belleza','herramientas','gaming','bebes','salud','mascotas'],
     integracion:{ modo:'api', estado:'requiere-cuenta', doc:'https://webservices.amazon.com/paapi5/documentation/',

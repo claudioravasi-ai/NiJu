@@ -121,6 +121,9 @@
   height:clamp(240px,32vw,400px); padding:14px;
 }
 .pdp-gal img{ width:100%; height:100%; object-fit:contain; background:transparent; }
+/* La foto real ocupa todo el cuadro, sobre blanco como la publica la tienda. */
+.pdp-gal .pdp-foto{ width:100%; height:100%; aspect-ratio:auto; background:#fff; border-radius:calc(var(--r) - 2px); overflow:hidden; }
+.pdp-gal .pdp-foto img{ background:#fff; }
 .pdp-miniaturas{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
 .pdp-mini{
   width:56px; height:56px; border-radius:var(--r); background:var(--surface);

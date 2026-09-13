@@ -15,7 +15,7 @@ import { vistaPedido } from './ui/pedido.js';
 import { vistaGrupal } from './ui/grupal.js';
 import { vistaDemanda } from './ui/demanda.js';
 import { vistaTienda } from './ui/tienda.js';
-import { esDueno, entrar, salir } from './engine/sesion.js';
+import { esDueno, entrar, salir, verificarClave } from './engine/sesion.js';
 import { vistaCarrito } from './ui/carrito.js';
 import { vistaCuenta } from './ui/cuenta.js';
 import { vistaPanel } from './ui/panel.js';
@@ -43,64 +43,24 @@ const ir = ruta => { location.hash = ruta; };
 
 
 /* ------------------------------------------------------------------
-   Identidad. Dos piezas:
-     · el isotipo (el dibujo), que va en un cuadrado redondeado
-     · la palabra NiJu al lado
-   Si el archivo del isotipo no está, cae a la marca vectorial, que
-   toma el color del texto y se ve bien de día y de noche.
+   Identidad: un emblema y la palabra NiJu al lado.
+   El emblema es una bolsa de compras con un tilde (lo compramos por
+   vos) y un punto verde (ya llega). Va en vector, así se ve nítido a
+   cualquier tamaño y en modo día y noche. Reemplazó al isotipo del pez:
+   a 30 píxeles no se reconocía.
    ------------------------------------------------------------------ */
-const MARCA_SVG = `<svg viewBox="0 0 660 230" aria-hidden="true">
-  <g fill="none" stroke="currentColor" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M96 196 V106 C96 72 138 66 155 100 L246 182 C262 198 282 190 282 166 V74"/>
-    <path d="M338 196 V120"/>
-    <path d="M416 62 V158 C416 196 366 202 352 176"/>
-    <path d="M492 108 V160 C492 196 548 196 548 160 V108"/>
-    <path d="M548 108 V196"/>
-  </g>
-  <circle cx="338" cy="80" r="15" fill="currentColor"/>
+const EMBLEMA_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <rect width="48" height="48" rx="13" fill="#3483fa"/>
+  <path d="M19 19.5v-3.2a5 5 0 0 1 10 0v3.2" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M13.5 19h21l-1.7 17.6a3 3 0 0 1-3 2.7H18.2a3 3 0 0 1-3-2.7Z" fill="#fff"/>
+  <path d="M19.3 29.4l3.2 3.2 6.2-6.6" fill="none" stroke="#3483fa" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="37.5" cy="11" r="6.2" fill="#00a650" stroke="#fff" stroke-width="2.6"/>
 </svg>`;
 
-/* Buscamos el dibujo una sola vez, probando los formatos posibles:
-   no le vamos a pedir a nadie que convierta un jpg a png. */
-let isotipoURL = null;      // null = sin averiguar, false = no está
-const oyentesIsotipo = new Set();
-
-function verificarIsotipo(){
-  if (isotipoURL !== null) return;
-  const candidatos = [].concat(CONFIG.isotipo || []);
-  if (!candidatos.length){ isotipoURL = false; return; }
-
-  let i = 0;
-  const probar = () => {
-    if (i >= candidatos.length){ isotipoURL = false; return; }
-    const url = candidatos[i++];
-    const img = new Image();
-    img.onload  = () => { isotipoURL = url; oyentesIsotipo.forEach(f => f()); };
-    img.onerror = probar;
-    img.src = url;
-  };
-  probar();
-}
-
 function logoNiju(clase){
-  const cont = el('span', { class:'marca ' + clase, role:'img', 'aria-label':'NiJu' });
-
-  const armar = () => {
-    if (isotipoURL){
-      const cuadro = el('span', { class:'isotipo' });
-      cuadro.style.backgroundImage = `url("${isotipoURL}")`;
-      cuadro.style.setProperty('--zoom', CONFIG.isotipoZoom || '205%');
-      cuadro.style.setProperty('--foco', CONFIG.isotipoFoco || '27% 56%');
-      cont.replaceChildren(cuadro,
-        el('span', { class:'marca-texto' }, CONFIG.isotipoTexto || 'NiJu'));
-    } else {
-      cont.replaceChildren(el('span', { class:'logo ' + clase, html:MARCA_SVG }));
-    }
-  };
-
-  armar();
-  if (isotipoURL === null){ oyentesIsotipo.add(armar); verificarIsotipo(); }
-  return cont;
+  return el('span', { class:'marca ' + clase, role:'img', 'aria-label':'NiJu' },
+    el('span', { class:'emblema', html:EMBLEMA_SVG }),
+    el('span', { class:'marca-texto' }, 'Ni', el('b', {}, 'Ju')));
 }
 
 /* ------------------------------------------------------------------
@@ -137,13 +97,23 @@ function botonTema(){
   return b;
 }
 
+let abrirMenu = () => {}, cerrarMenu = () => {};
+const CLAVE_MENU_FIJO = 'niju.menuFijo';
+const ANCHO_ESCRITORIO = matchMedia('(min-width: 901px)');
+
 function construirShell(){
+  /* Chinche para dejar el menú fijo al costado. Va adentro del menú
+     porque al abrirse tapa la hamburguesa de la cabecera. */
+  const fijar = el('button', { class:'iconbtn btn-fijar', title:'Fijar menú', 'aria-label':'Fijar menú',
+                               'aria-pressed':'false', onclick:() => fijarMenu(!menuFijo()) }, ic('pin'));
   const rail = el('aside', { class:'rail' },
-    el('a', { class:'brand brand-full', href:'#/', 'aria-label':'NiJu — inicio',
-              onclick:contarToques },
-      logoNiju('logo-rail'),
-      el('div', { class:'brand-sub' }, 'compra todo, de todo y para todo')),
-    ...NAV.filter(n => !n.privado || esDueno()).map(n => el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => ir(n.ruta) },
+    el('div', { class:'rail-head' },
+      el('a', { class:'brand brand-full', href:'#/', 'aria-label':'NiJu — inicio',
+                onclick:contarToques },
+        logoNiju('logo-rail'),
+        el('div', { class:'brand-sub' }, 'compra todo, de todo y para todo')),
+      fijar),
+    ...NAV.filter(n => !n.privado || esDueno()).map(n => el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => { cerrarMenu(); ir(n.ruta); } },
       ic(n.icono), el('span', { class:'spacer' }, n.label),
       n.ruta === '#/carrito' ? el('span', { class:'tiny mono', data:{ badge:'carrito' } }, '') : null)),
     el('div', { class:'rail-foot' },
@@ -158,8 +128,62 @@ function construirShell(){
     }
   });
 
+  /* Hamburguesa: con el mouse encima se abre el menú; mientras el mouse
+     esté sobre ella o sobre el menú, sigue abierto. Al tocarla (celular,
+     tablet) abre y cierra. */
+  const hamburguesa = el('button', { class:'iconbtn btn-menu', title:'Menú (clic para fijarlo)', 'aria-label':'Menú',
+                                     'aria-expanded':'false', onclick:() => {
+      /* En la computadora, el clic fija o suelta el menú (pasar el
+         mouse ya lo muestra). En el celular, abre y cierra. */
+      if (ANCHO_ESCRITORIO.matches) fijarMenu(!menuFijo());
+      else rail.classList.contains('abierto') ? cerrarMenu() : abrirMenu();
+    } }, ic('menu'));
+  let temporizador = null;
+  abrirMenu = () => {
+    clearTimeout(temporizador);
+    rail.classList.add('abierto');
+    hamburguesa.setAttribute('aria-expanded', 'true');
+  };
+  cerrarMenu = () => {
+    clearTimeout(temporizador);
+    if (menuFijo() && ANCHO_ESCRITORIO.matches) return;   // fijado: no se esconde
+    rail.classList.remove('abierto');
+    hamburguesa.setAttribute('aria-expanded', 'false');
+  };
+  let fijo = false;
+  const menuFijo = () => fijo;
+  function fijarMenu(si){
+    fijo = si;
+    document.documentElement.classList.toggle('menu-fijo', si);
+    hamburguesa.title = si ? 'Soltar menú' : 'Menú (clic para fijarlo)';
+    fijar.setAttribute('aria-pressed', String(si));
+    fijar.title = si ? 'Soltar menú' : 'Fijar menú';
+    fijar.setAttribute('aria-label', fijar.title);
+    try{ localStorage.setItem(CLAVE_MENU_FIJO, si ? '1' : ''); }catch{}
+    if (!si) cerrarMenu();
+    else if (ANCHO_ESCRITORIO.matches) abrirMenu();
+  }
+  /* La preferencia se aplica siempre; el CSS solo la hace valer en
+     pantallas anchas. En el celular el menú sigue siendo desplegable. */
+  try{ if (localStorage.getItem(CLAVE_MENU_FIJO)) fijarMenu(true); }catch{}
+  ANCHO_ESCRITORIO.addEventListener('change', e => {
+    if (!menuFijo()) return;
+    if (e.matches) abrirMenu();
+    else { rail.classList.remove('abierto'); hamburguesa.setAttribute('aria-expanded', 'false'); }
+  });
+  const cerrarPronto = () => { clearTimeout(temporizador); temporizador = setTimeout(cerrarMenu, 400); };
+  for (const zona of [hamburguesa, rail]){
+    zona.addEventListener('mouseenter', abrirMenu);
+    zona.addEventListener('mouseleave', cerrarPronto);
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarMenu(); });
+  document.addEventListener('pointerdown', e => {
+    if (rail.classList.contains('abierto') && !rail.contains(e.target) && !hamburguesa.contains(e.target)) cerrarMenu();
+  });
+
   const topbar = el('header', { class:'topbar' },
     el('div', { class:'topbar-in' },
+      hamburguesa,
       el('a', { href:'#/', class:'brand brand-movil', 'aria-label':'NiJu — inicio',
                 onclick:contarToques }, logoNiju('logo-top')),
       el('div', { class:'search' }, ic('buscar'), buscador),
@@ -175,6 +199,11 @@ function construirShell(){
         el('span', { class:'dot', data:{ badge:'top' }, hidden:true }, '0'))));
 
   const main = el('main', { class:'main' }, topbar, el('div', { id:'vista' }));
+
+  /* El menú sin fijar arranca justo debajo de la cabecera. */
+  const medirCabecera = () => document.documentElement.style.setProperty('--alto-cab', topbar.offsetHeight + 'px');
+  requestAnimationFrame(medirCabecera);
+  window.addEventListener('resize', medirCabecera);
 
   /* La barra de abajo del celular: si sos el dueño, la última posición
      lleva al Panel en vez de a Mi cuenta. */
@@ -241,13 +270,22 @@ function vistaEntrar(ir){
       esDueno()
         ? el('div', { class:'col' },
             el('div', { class:'notice notice-ok' }, 'Tenés el Panel y Conectores visibles en el menú.'),
-            el('button', { class:'btn btn-block', onclick:() => { salir(); toast('Saliste del modo dueño'); ir('#/'); } }, 'Salir del modo dueño'))
+            el('button', { class:'btn btn-block', onclick:() => { salir(); toast('Saliste del modo dueño'); location.hash = '#/'; location.reload(); } }, 'Salir del modo dueño'))
         : el('div', { class:'col' },
             el('p', { class:'tiny muted' },
-              'Tiene que ser la misma clave que cargaste en el backend como ADMIN_TOKEN. Se guarda solo en este dispositivo y viaja en cada operación sensible para que el servidor la valide.'),
+              'Tiene que ser la misma clave que cargaste en Cloudflare como ADMIN_TOKEN. El servidor la verifica antes de abrir el Panel; con cualquier otra clave no se entra.'),
             el('div', { class:'field' }, el('label', {}, 'Clave'), clave),
-            el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => {
-              if (!entrar(clave.value.trim())) return toast('La clave tiene que tener al menos 6 caracteres', 'bad');
+            el('button', { class:'btn btn-lg btn-win btn-block', onclick: async e => {
+              const valor = clave.value.trim();
+              if (valor.length < 6) return toast('La clave tiene que tener al menos 6 caracteres', 'bad');
+              const boton = e.currentTarget;
+              boton.disabled = true; boton.textContent = 'Verificando…';
+              const resultado = await verificarClave(valor);
+              boton.disabled = false; boton.textContent = 'Entrar';
+              if (resultado === 'mala')         { clave.value = ''; return toast('Clave incorrecta', 'bad'); }
+              if (resultado === 'sin-clave')    return toast('Todavía no cargaste ADMIN_TOKEN en Cloudflare', 'bad');
+              if (resultado === 'sin-conexion') return toast('No se pudo verificar la clave: revisá la conexión o volvé a subir el worker', 'bad');
+              entrar(valor);
               toast('Modo dueño activado', 'win');
               location.hash = '#/panel'; location.reload();
             } }, 'Entrar'))));
@@ -305,6 +343,14 @@ async function iniciar(){
     toast('Cotización actualizada: dólar tarjeta $' + Math.round(FX.tarjeta));
     rutear(ctx);           // recalcula todos los precios con el cambio nuevo
   });
+
+  /* La app siempre abre en el inicio. Si quedó guardada la dirección del
+     Panel y no hay sesión de dueño abierta, no la reabrimos: el dueño
+     entra de nuevo con los cinco toques al logo o por #/entrar. */
+  const rutaInicial = (location.hash.slice(1).split('?')[0]);
+  if (['/panel', '/tiendas'].includes(rutaInicial) && !esDueno()){
+    history.replaceState(null, '', location.pathname + location.search + '#/');
+  }
 
   window.addEventListener('hashchange', () => rutear(ctx));
   rutear(ctx);
