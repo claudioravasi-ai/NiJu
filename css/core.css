@@ -385,6 +385,30 @@ svg.ic{ width:18px; height:18px; flex:0 0 18px; }
 .tbl tr:hover td{ background:var(--surface-2); }
 .tbl tr.is-win td{ background:color-mix(in srgb, var(--win) 8%, var(--surface)); }
 .tbl-wrap{ overflow-x:auto; border-radius:var(--r); box-shadow:var(--shadow); background:var(--surface); }
+/* Comparación de tiendas: el desglose va en renglones chicos. */
+.tbl-cmp td{ padding:10px; }
+.tbl-cmp td:nth-child(2){ min-width:150px; }
+.cmp-linea{ display:flex; justify-content:space-between; gap:10px; line-height:1.55; }
+.tbl-cmp td:last-child{ text-align:right; }
+/* La tabla se adapta a SU ancho, no al de la ventana: al lado del cuadro
+   de compra (o con el menú fijado) la columna queda angosta aunque la
+   pantalla sea grande. Por debajo de 620 px, cada tienda es una tarjeta. */
+.tbl-wrap{ container-type:inline-size; }
+@container (max-width: 620px){
+  .tbl-cmp thead{ display:none; }
+  .tbl-cmp, .tbl-cmp tbody{ display:block; }
+  .tbl-cmp tr{
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 12px;
+    padding:12px; border-bottom:var(--bw) solid var(--line-soft);
+  }
+  .tbl-cmp tr.is-win{ background:color-mix(in srgb, var(--win) 8%, var(--surface)); }
+  .tbl-cmp td, .tbl-cmp tr:hover td, .tbl-cmp tr.is-win td{ display:block; padding:0; border:0; background:none; min-width:0; }
+  .tbl-cmp td:nth-child(1){ grid-column:1; grid-row:1; }
+  .tbl-cmp td:nth-child(3){ grid-column:2; grid-row:1; text-align:right; }
+  .tbl-cmp td:nth-child(2){ grid-column:1 / -1; }
+  .tbl-cmp td:nth-child(4){ grid-column:1 / -1; text-align:left; }
+  .tbl-cmp td:nth-child(4) .btn{ width:100%; justify-content:center; }
+}
 
 /* ---------------- Logo de tienda ---------------- */
 .slogo{

@@ -180,31 +180,36 @@ function ficha(g, ir){
 
     const min = filas[0]?.total || 0;
 
+    /* Cuatro columnas en vez de nueve: la tabla ancha no entraba al lado
+       del cuadro de compra y quedaba cortada. El desglose va en renglones
+       chicos dentro de una sola celda. */
+    const renglon = (k, v) => el('div', { class:'cmp-linea' }, el('span', { class:'dim' }, k), el('span', { class:'mono' }, v));
+    const verde = txt => el('span', { style:{ color:'var(--ok)' } }, txt);
+
     tabla.replaceChildren(el('div', { class:'tbl-wrap' },
-      el('table', { class:'tbl' },
+      el('table', { class:'tbl tbl-cmp' },
         el('thead', {}, el('tr', {},
-          el('th', {}, 'Tienda'), el('th', {}, 'Origen'), el('th', {}, 'Producto'),
-          el('th', {}, 'Envío'), el('th', {}, 'Impuestos'), el('th', {}, 'Gestión'),
-          el('th', {}, 'Final'), el('th', {}, 'Entrega'), el('th', {}, ''))),
+          el('th', {}, 'Tienda'), el('th', {}, 'Desglose'), el('th', {}, 'Final'), el('th', {}, ''))),
         el('tbody', {}, ...filas.map(({ o, t, c, total, fee }) => {
           const esMejor = total === min;
+          const pl = plazo({ despacho:o.entregaDias, provincia:store.get('config').provincia,
+                             internacional:c.internacional });
           return el('tr', { class: esMejor ? 'is-win' : '' },
-            el('td', {}, el('div', { class:'row' }, logoTienda(o.tiendaId),
-              el('div', {}, el('div', { class:'row', style:{ gap:'5px' } }, el('b', {}, t?.nombre || o.tiendaId), selloOrigen(o)),
-                el('div', { class:'tiny dim' }, o.vendedor)))),
-            el('td', {}, tagTipo(t?.tipo)),
-            el('td', { class:'mono' }, plata(c.productoARS),
-              o.moneda !== 'ARS' ? el('div', { class:'tiny dim' }, plata(o.precio, o.moneda)) : null),
-            el('td', { class:'mono' }, c.envioARS ? plata(c.envioARS) : el('span', { style:{ color:'var(--ok)' } }, 'gratis')),
-            el('td', { class:'mono' }, c.impuestosARS ? plata(c.impuestosARS) : '—'),
-            el('td', { class:'mono' }, fee.gratis ? el('span', { style:{ color:'var(--ok)' } }, 'sin cargo') : plata(fee.feeUSD * FX.tarjeta)),
+            el('td', {}, el('div', { class:'row', style:{ alignItems:'flex-start' } }, logoTienda(o.tiendaId),
+              el('div', { style:{ minWidth:0 } },
+                el('b', {}, t?.nombre || o.tiendaId),
+                el('div', { class:'row wrapf', style:{ gap:'5px', marginTop:'3px' } }, selloOrigen(o), tagTipo(t?.tipo)),
+                o.vendedor ? el('div', { class:'tiny dim', style:{ marginTop:'3px' } }, o.vendedor) : null))),
+            el('td', { class:'tiny' },
+              renglon('Producto', plata(c.productoARS)),
+              o.moneda !== 'ARS' ? el('div', { class:'tiny dim' }, plata(o.precio, o.moneda)) : null,
+              renglon('Envío', c.envioARS ? plata(c.envioARS) : verde('gratis')),
+              c.impuestosARS ? renglon('Impuestos', plata(c.impuestosARS)) : null,
+              renglon('Gestión', fee.gratis ? verde('sin cargo') : plata(fee.feeUSD * FX.tarjeta))),
             el('td', {}, el('b', { class:'price', style:{ fontSize:'16px', color: esMejor ? 'var(--win)' : '' } }, plata(total)),
               esMejor ? el('div', { class:'tiny', style:{ color:'var(--win-tx)', fontWeight:'800' } }, 'MEJOR') :
-                el('div', { class:'tiny dim' }, '+' + plata(total - min))),
-            el('td', { class:'tiny' }, (() => {
-              const pl = plazo({ despacho:o.entregaDias, provincia:store.get('config').provincia,
-                                 internacional:c.internacional });
-              return `${pl.min}-${pl.max} d`; })()),
+                el('div', { class:'tiny dim' }, '+' + plata(total - min)),
+              el('div', { class:'tiny dim', style:{ marginTop:'3px' } }, `llega en ${pl.min}-${pl.max} días`)),
             el('td', {}, el('button', { class:'btn btn-sm ' + (esMejor ? 'btn-win' : ''),
               onclick:() => { elegida = o; pintarBuyBox(); window.scrollTo({ top:0, behavior:'smooth' }); } }, 'Elegir')));
         })))));
