@@ -239,6 +239,31 @@ svg.ic{ width:18px; height:18px; flex:0 0 18px; }
 .nav-item.on{ background:var(--accion-suave); color:var(--accion); font-weight:600; }
 .nav-item .ic{ width:18px; height:18px; flex:0 0 18px; }
 .nav-sep{ height:1px; background:var(--line); margin:9px 6px; }
+
+/* Comprar por tienda: renglón que despliega la lista de tiendas. */
+.nav-item .sub-flecha{ width:16px; height:16px; flex:0 0 16px; transition:transform .2s; }
+.sub.abierto .sub-flecha{ transform:rotate(180deg); }
+.sub-cant{ font-size:11px; color:var(--tx-3); font-weight:500; }
+.nav-item:hover .sub-cant{ color:#fff; }
+.sub-cuerpo{
+  display:flex; flex-direction:column; gap:2px;
+  margin:4px 0 8px 19px; padding-left:10px; border-left:2px solid var(--line);
+}
+.sub-filtro{
+  margin:2px 0 6px; padding:7px 10px; font-size:13px; outline:0; width:100%;
+  background:var(--surface); color:var(--tx); border:var(--bw) solid var(--line-firme); border-radius:var(--r);
+}
+.sub-filtro:focus{ border-color:var(--accion); box-shadow:0 0 0 3px var(--accion-suave); }
+.sub-lista{ display:flex; flex-direction:column; max-height:min(50vh, 420px); overflow-y:auto; }
+.sub-item{
+  display:flex; align-items:center; gap:9px; padding:6px 8px; font-size:13px; text-align:left;
+  background:none; border:0; border-radius:var(--r); cursor:pointer; color:var(--tx-2);
+  transition:background-color .15s, color .15s;
+}
+.sub-item .slogo{ width:22px; height:22px; flex:0 0 22px; font-size:9px; padding:2px; }
+.sub-item:hover{ background:var(--accion-suave); color:var(--accion); }
+.sub-item.on{ background:var(--accion-suave); color:var(--accion); font-weight:600; }
+.sub-vacio{ padding:6px 8px; font-size:12px; color:var(--tx-3); }
 .rail-foot{ margin-top:auto; padding:10px 8px; font-size:11px; color:var(--tx-3); }
 
 .main{ flex:1; min-width:0; display:flex; flex-direction:column; }
@@ -334,6 +359,32 @@ svg.ic{ width:18px; height:18px; flex:0 0 18px; }
 .tag-ok{ color:var(--ok); }
 .tag-warn{ color:var(--warn); }
 .tag-bad{ color:var(--bad); }
+
+/* ---------------- Modo dueño ----------------
+   Píldora chica: el estado a la izquierda y la salida a la derecha,
+   en gris suave. Se tiñe de rojo solo al pasar el mouse. */
+.duenio-pill{
+  display:inline-flex; align-items:center; gap:2px; padding:3px;
+  background:var(--surface); border-radius:var(--r-pill);
+  box-shadow:inset 0 0 0 1px var(--line), var(--shadow);
+}
+.duenio-estado{
+  display:inline-flex; align-items:center; gap:7px; padding:4px 10px 4px 9px;
+  font-size:12px; font-weight:600; color:var(--win-tx);
+}
+.duenio-estado i{
+  width:7px; height:7px; border-radius:50%; background:var(--ok);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+.duenio-salir{
+  display:inline-flex; align-items:center; gap:5px; padding:5px 12px 5px 9px;
+  font-size:12px; font-weight:500; color:var(--tx-2); cursor:pointer;
+  background:var(--surface-2); border:0; border-radius:var(--r-pill);
+  transition:background-color .15s, color .15s, transform .1s;
+}
+.duenio-salir .ic{ width:14px; height:14px; flex:0 0 14px; }
+.duenio-salir:hover{ background:color-mix(in srgb, var(--bad) 14%, var(--surface)); color:var(--bad); }
+.duenio-salir:active{ transform:scale(.96); }
 
 /* ---------------- Tarjetas ---------------- */
 .card{

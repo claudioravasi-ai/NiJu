@@ -1,0 +1,273 @@
+/* ============================================================
+   NiJu — Portada
+   Vidriera de marketplace grande: el amarillo de la cabecera se
+   derrama detrás del banner (como Mercado Libre), los atajos se
+   montan sobre el banner y cada fila de productos va en un panel
+   blanco. Todo corto: la portada entra en pocas pantallas.
+   ============================================================ */
+.portada{ padding-bottom:36px; }
+
+.p-top{
+  background:linear-gradient(180deg, var(--cab) 0, var(--cab) 70px, color-mix(in srgb, var(--cab) 30%, var(--bg)) 190px, var(--bg) 340px);
+  padding:16px 0 2px;
+}
+
+/* ---------------- Banner giratorio ---------------- */
+.p-banner{
+  position:relative; overflow:hidden; border-radius:var(--r-lg);
+  box-shadow:var(--shadow-2); height:clamp(270px, 25vw, 320px);
+}
+.p-banner-pista{ display:flex; height:100%; transition:transform .65s cubic-bezier(.22,.7,.2,1); }
+.p-slide{
+  flex:0 0 100%; min-width:0; position:relative; overflow:hidden; color:#fff;
+  display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); align-items:center; gap:24px;
+  padding:26px clamp(24px,5vw,68px) 58px;
+}
+/* Dos círculos de luz de fondo para que no sea un plano liso. */
+.p-slide::before, .p-slide::after{
+  content:''; position:absolute; border-radius:50%; pointer-events:none;
+  background:rgba(255,255,255,.12);
+}
+.p-slide::before{ width:420px; height:420px; right:-90px; top:-170px; }
+.p-slide::after{ width:220px; height:220px; right:34%; bottom:-150px; background:rgba(255,255,255,.08); }
+.p-s-ofertas{ background:linear-gradient(115deg, #1f55cc, #3483fa 55%, #62a6ff); }
+.p-s-traelo { background:linear-gradient(115deg, #4c22c0, #8c52ff 58%, #b690ff); }
+.p-s-final  { background:linear-gradient(115deg, #007a43, #00a650 58%, #3fd087); }
+.p-s-grupal { background:linear-gradient(115deg, #d44b10, #ff7733 58%, #ffa566); }
+
+.p-slide-txt{ position:relative; z-index:1; }
+.p-slide-kicker{
+  display:inline-block; margin-bottom:10px; padding:4px 11px;
+  background:rgba(255,255,255,.2); border-radius:var(--r-pill);
+  font-size:11.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+}
+.p-slide h2{
+  font-size:clamp(25px, 3.1vw, 40px); font-weight:700; line-height:1.07; letter-spacing:-.02em;
+  margin-bottom:10px; color:#fff; text-wrap:balance;
+}
+.p-slide p{ font-size:clamp(14px, 1.25vw, 16px); opacity:.93; max-width:46ch; margin-bottom:18px; }
+.p-resalte{ background:#ffe600; color:#1f1f1f; padding:0 .22em; border-radius:6px; white-space:nowrap; }
+.p-cta{
+  display:inline-flex; align-items:center; gap:8px; padding:11px 20px;
+  background:#fff; color:#1f1f1f; border:0; border-radius:var(--r-pill);
+  font-weight:600; font-size:15px; cursor:pointer;
+  box-shadow:0 6px 18px rgba(0,0,0,.2); transition:transform .15s, box-shadow .15s;
+}
+.p-cta:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.25); }
+.p-cta .ic{ width:16px; height:16px; flex:0 0 16px; }
+
+.p-slide-visual{ position:relative; z-index:1; display:flex; justify-content:center; align-items:center; height:100%; }
+
+/* Fotos reales de las ofertas más rebajadas */
+.p-slide-fotos{ display:flex; gap:16px; align-items:center; }
+.p-slide-foto{
+  position:relative; width:clamp(112px, 11vw, 150px); aspect-ratio:1/1; padding:8px;
+  background:#fff; border:0; border-radius:16px; cursor:pointer;
+  box-shadow:0 12px 30px rgba(0,0,0,.28); transition:transform .25s;
+}
+.p-slide-foto:nth-child(2){ transform:translateY(-14px) scale(1.12); z-index:1; }
+.p-slide-foto:hover{ transform:translateY(-6px); }
+.p-slide-foto:nth-child(2):hover{ transform:translateY(-20px) scale(1.15); }
+.p-slide-foto.sk{ background:rgba(255,255,255,.3); box-shadow:none; }
+.p-slide-img{ width:100%; height:100%; background:#fff; border-radius:10px; }
+.p-slide-off{
+  position:absolute; top:-9px; right:-9px; padding:3px 9px;
+  background:#ffe600; color:#1f1f1f; font-weight:800; font-size:13px;
+  border-radius:var(--r-pill); box-shadow:0 3px 10px rgba(0,0,0,.2);
+}
+
+/* Logos de tiendas del exterior */
+.p-slide-logos{ display:grid; grid-template-columns:repeat(3, auto); gap:16px; }
+.p-slide-logos .slogo{
+  width:68px; height:68px; flex:none; padding:12px; font-size:18px;
+  border-radius:18px; box-shadow:0 10px 24px rgba(0,0,0,.22);
+}
+.p-slide-logos .slogo:nth-child(even){ transform:translateY(14px); }
+
+/* Cuenta del precio final */
+.p-slide-cuenta{
+  display:flex; flex-direction:column; gap:9px; min-width:230px; padding:18px 22px;
+  background:#fff; color:#333; border-radius:16px; box-shadow:0 12px 30px rgba(0,0,0,.25); font-size:14.5px;
+}
+.p-slide-cuenta > div{ display:flex; align-items:center; gap:9px; }
+.p-slide-cuenta .ic{ width:17px; height:17px; flex:0 0 17px; color:#00a650; }
+.p-slide-total{ border-top:1px dashed #ccc; padding-top:11px; font-weight:700; font-size:17px; color:#00a650; }
+
+/* Escalera de la compra grupal */
+.p-slide-escalera{ display:flex; align-items:flex-end; gap:14px; height:170px; }
+.p-slide-escalera i{
+  width:40px; background:rgba(255,255,255,.92); border-radius:9px 9px 3px 3px;
+  transform-origin:bottom; animation:p-crecer .8s both;
+}
+@keyframes p-crecer{ from{ transform:scaleY(.1); } }
+
+.p-banner-flecha{
+  position:absolute; top:50%; transform:translateY(-50%); z-index:3;
+  width:42px; height:66px; display:grid; place-items:center; border:0; cursor:pointer;
+  background:rgba(255,255,255,.92); color:#3483fa; box-shadow:var(--shadow-2);
+  opacity:0; transition:opacity .2s;
+}
+.p-banner-flecha.izq{ left:0; border-radius:0 12px 12px 0; }
+.p-banner-flecha.der{ right:0; border-radius:12px 0 0 12px; }
+.p-banner:hover .p-banner-flecha, .p-banner-flecha:focus-visible{ opacity:1; }
+.p-banner-puntos{
+  position:absolute; left:50%; bottom:40px; transform:translateX(-50%); z-index:3;
+  display:flex; gap:7px;
+}
+.p-banner-puntos button{
+  width:8px; height:8px; padding:0; border:0; cursor:pointer;
+  border-radius:var(--r-pill); background:rgba(255,255,255,.5); transition:width .25s, background .25s;
+}
+.p-banner-puntos button.on{ width:24px; background:#fff; }
+
+/* ---------------- Atajos montados sobre el banner ---------------- */
+.p-atajos{
+  position:relative; z-index:4; margin-top:-26px; padding:0 clamp(10px, 2vw, 26px);
+  display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px;
+}
+.p-atajo{
+  display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:12px; row-gap:1px; align-content:start;
+  padding:15px 16px; text-align:left; cursor:pointer; color:var(--tx);
+  background:var(--surface); border:0; border-radius:var(--r-lg); box-shadow:var(--shadow-2);
+  transition:transform .18s, box-shadow .18s;
+}
+.p-atajo:hover{ transform:translateY(-3px); box-shadow:var(--shadow-3); }
+.p-atajo-ic{
+  grid-row:1 / span 3; width:44px; height:44px; border-radius:50%;
+  display:grid; place-items:center; background:var(--accion-suave); color:var(--accion);
+}
+.p-atajo-ic .ic{ width:21px; height:21px; }
+.p-atajo b{ font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-atajo-tx{ font-size:12.5px; color:var(--tx-2); line-height:1.35; }
+.p-atajo-link{ margin-top:5px; font-size:12.5px; font-weight:600; color:var(--accion); }
+
+/* ---------------- Paneles ---------------- */
+.p-bloque{
+  margin-top:24px; padding:18px 18px 12px;
+  background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow);
+}
+.p-bloque-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.p-bloque-head h2{ font-size:clamp(18px, 2vw, 22px); font-weight:600; }
+.p-bloque-kicker{ font-size:13px; color:var(--tx-3); }
+.p-link{
+  display:inline-flex; align-items:center; gap:4px; padding:4px 0;
+  background:none; border:0; cursor:pointer; color:var(--accion); font-weight:600; font-size:14px;
+}
+.p-link .ic{ width:15px; height:15px; flex:0 0 15px; transition:transform .15s; }
+.p-link:hover .ic{ transform:translateX(3px); }
+
+/* ---------------- Carruseles ---------------- */
+.p-carrusel{ position:relative; }
+.p-pista{
+  display:flex; gap:14px; overflow-x:auto; padding:4px 2px 10px;
+  scroll-snap-type:x mandatory; scrollbar-width:none;
+}
+.p-pista::-webkit-scrollbar{ display:none; }
+.p-pista > *{ flex:0 0 clamp(168px, 16.5vw, 212px); scroll-snap-align:start; }
+.p-flecha{
+  position:absolute; top:38%; z-index:3; width:46px; height:46px;
+  display:grid; place-items:center; cursor:pointer; border:0; border-radius:50%;
+  background:var(--surface); color:var(--accion); box-shadow:var(--shadow-3);
+  transition:transform .15s;
+}
+.p-flecha:hover{ transform:scale(1.08); }
+.p-flecha.izq{ left:-12px; }
+.p-flecha.der{ right:-12px; }
+
+/* Tarjeta de producto */
+.p-prod{
+  display:flex; flex-direction:column; overflow:hidden; cursor:pointer;
+  background:var(--surface); border-radius:var(--r-lg);
+  box-shadow:inset 0 0 0 1px var(--line-soft); transition:transform .18s, box-shadow .18s;
+}
+.p-prod:hover{ transform:translateY(-3px); box-shadow:var(--shadow-2); }
+.p-prod-foto{ aspect-ratio:1/1; padding:10px; background:#fff; border-bottom:1px solid var(--line-soft); }
+.p-prod-foto img{ transition:transform .3s; }
+.p-prod:hover .p-prod-foto img{ transform:scale(1.05); }
+.p-prod-body{ display:flex; flex-direction:column; gap:3px; padding:10px 12px 14px; }
+.p-prod-tienda{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--tx-3); }
+.p-prod-tienda .slogo{ width:18px; height:18px; flex:0 0 18px; font-size:8px; padding:1px; border-radius:4px; }
+.p-prod-tit{
+  font-size:13.5px; font-weight:400; line-height:1.3; color:var(--tx-2); min-height:2.6em; margin:3px 0 2px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.p-tachado{ font-size:12px; color:var(--tx-3); text-decoration:line-through; }
+.p-prod-fila{ display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; }
+.p-prod-precio{ font-size:22px; font-weight:400; line-height:1.1; letter-spacing:-.01em; color:var(--tx); }
+.p-off{ margin-top:3px; font-size:14px; font-weight:600; color:var(--win-tx); }
+.p-envio{ font-size:12.5px; font-weight:600; color:var(--win-tx); }
+.p-comparado{ font-size:11.5px; font-weight:500; color:var(--accion); }
+
+/* ---------------- Tarjetas de a cuatro fotos ---------------- */
+.p-rubros-cards{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin-top:24px; }
+.p-rubro-card{
+  display:flex; flex-direction:column; gap:12px; padding:16px;
+  background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow);
+}
+.p-rubro-card h3{ font-size:17px; font-weight:600; }
+.p-cuatro{ display:grid; grid-template-columns:1fr 1fr; gap:12px; flex:1; }
+.p-cuatro-item{
+  display:flex; flex-direction:column; gap:5px; padding:0; min-width:0;
+  background:none; border:0; cursor:pointer; text-align:left; font-size:12px; color:var(--tx-2);
+}
+.p-cuatro-foto{
+  aspect-ratio:1/1; padding:6px; border-radius:8px; background:#fff;
+  box-shadow:inset 0 0 0 1px var(--line-soft); transition:transform .2s;
+}
+.p-cuatro-item:hover .p-cuatro-foto{ transform:scale(1.04); }
+.p-cuatro-item b{ font-weight:600; color:var(--win-tx); }
+
+/* ---------------- Categorías en círculos ---------------- */
+.p-pista-cat > *{ flex:0 0 112px; }
+.p-cat{
+  display:flex; flex-direction:column; align-items:center; gap:6px; padding:6px 2px;
+  background:none; border:0; cursor:pointer; text-align:center; color:var(--tx);
+}
+.p-cat-ic{
+  width:76px; height:76px; border-radius:50%; display:grid; place-items:center; font-size:34px;
+  background:color-mix(in srgb, var(--rc, var(--accion)) 22%, var(--surface));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--rc, var(--accion)) 38%, transparent);
+  transition:transform .2s, box-shadow .2s;
+}
+.p-cat:hover .p-cat-ic{
+  transform:translateY(-4px) scale(1.05);
+  box-shadow:0 10px 20px color-mix(in srgb, var(--rc, var(--accion)) 40%, transparent);
+}
+.p-cat b{ font-size:13px; font-weight:500; line-height:1.2; }
+.p-cat small{ font-size:11px; color:var(--tx-3); }
+
+/* ---------------- Responsive ---------------- */
+@media (max-width:1100px){
+  .p-rubros-cards{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+}
+@media (max-width:900px){
+  .p-banner{ height:auto; }
+  .p-slide{ grid-template-columns:1fr; padding:22px 22px 60px; }
+  .p-slide-visual{ display:none; }
+  .p-atajos{
+    display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none;
+    margin-top:-24px; padding-bottom:8px;
+  }
+  .p-atajos::-webkit-scrollbar{ display:none; }
+  .p-atajo{ flex:0 0 250px; scroll-snap-align:start; }
+}
+@media (max-width:560px){
+  .p-top{ padding-top:10px; }
+  /* En el celular las tarjetas se deslizan de costado: una debajo de
+     otra alargaban la portada cuatro pantallas. */
+  .p-rubros-cards{
+    display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none;
+    margin-left:calc(-1 * clamp(14px,2.6vw,28px)); margin-right:calc(-1 * clamp(14px,2.6vw,28px));
+    padding:0 clamp(14px,2.6vw,28px) 6px; scroll-padding:0 clamp(14px,2.6vw,28px);
+  }
+  .p-rubros-cards::-webkit-scrollbar{ display:none; }
+  .p-rubro-card{ flex:0 0 82%; scroll-snap-align:start; }
+  .p-bloque{ padding:14px 12px 8px; }
+  .p-pista > *{ flex-basis:158px; }
+}
+@media (hover:none){ .p-flecha, .p-banner-flecha{ display:none; } }
+@media (prefers-reduced-motion:reduce){
+  .p-banner-pista{ transition:none; }
+  .p-slide-escalera i{ animation:none; }
+  .p-prod:hover, .p-atajo:hover, .p-cat:hover .p-cat-ic{ transform:none; }
+}

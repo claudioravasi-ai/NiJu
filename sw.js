@@ -3,10 +3,10 @@
    Antes el armazón iba cache-first con un nombre de caché fijo: el
    teléfono seguía mostrando la versión vieja aunque se subiera una
    nueva a GitHub. Cambiar CACHE en cada versión fuerza la limpieza. */
-const CACHE = 'niju-v0.2.0';
+const CACHE = 'niju-v0.2.2';
 const BASE = [
   './', './index.html', './manifest.json',
-  './css/core.css', './css/views.css', './css/compras.css',
+  './css/core.css', './css/views.css', './css/compras.css', './css/portada.css', './css/vitrina.css',
   './js/app.js', './js/config.js', './js/util.js', './js/state.js'
 ];
 

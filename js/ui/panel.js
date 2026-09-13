@@ -52,13 +52,16 @@ export function vistaPanel(ir){
       el('div', {},
         el('div', { class:'kicker' }, 'Solo para vos'),
         el('h1', {}, 'Panel NiJu')),
-      el('div', { class:'row wrapf' },
-        el('span', { class:'tag tag-ok' }, '● Modo dueño activo'),
+      /* Estado y salida en una sola píldora chica: la salida no compite
+         con las acciones del Panel y recién se tiñe de rojo al pasar el mouse. */
+      el('div', { class:'duenio-pill' },
+        el('span', { class:'duenio-estado' }, el('i'), 'Modo dueño'),
         el('button', {
-          class:'btn btn-sm',
-          title:'Oculta el Panel y los Conectores hasta que vuelvas a entrar',
+          class:'duenio-salir',
+          title:'Salir del modo dueño: oculta el Panel y los Conectores hasta que vuelvas a entrar',
+          'aria-label':'Salir del modo dueño',
           onclick:() => confirmarSalida()
-        }, ic('x'), 'Salir del modo dueño'))),
+        }, ic('salir'), 'Salir'))),
     tabs, cuerpo));
 
   function pintar(){

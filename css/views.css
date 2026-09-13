@@ -10,7 +10,10 @@
   background:var(--surface-2); display:grid; place-items:center;
   overflow:hidden; position:relative;
 }
-.foto img{ width:100%; height:100%; object-fit:contain; display:block; background:#fff; }
+/* La imagen se clava al cuadro. Con height:100% dentro de la grilla tomaba
+   su alto natural (653 px en un cuadro de 212) y solo se veía la franja del
+   medio: en una zapatilla sobre blanco, un cuadro vacío. */
+.foto img{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; background:#fff; }
 :root[data-theme="dark"] .foto img{ background:#f7f7f7; }
 .foto-vacia{
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;

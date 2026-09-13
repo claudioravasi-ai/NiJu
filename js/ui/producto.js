@@ -78,7 +78,16 @@ function ficha(g, ir){
       ? { ...o.costo, productoARS:precioTalle }
       : o.costo;
 
-    galeria.replaceChildren(foto({ imagen: sel.imagen() || o.imagen || g.imagen, titulo: o.titulo || g.titulo }, 'pdp-foto'));
+    /* La foto se cambia solo si cambia la dirección. Antes se rehacía en
+       cada repintado (al terminar de leer los talles, al elegir uno) y el
+       cliente veía el cuadro gris vacío mientras la misma foto recargaba. */
+    const urlFoto = sel.imagen() || o.imagen || g.imagen || '';
+    if (galeria.dataset.url !== urlFoto || !galeria.firstChild){
+      galeria.dataset.url = urlFoto;
+      const cuadro = foto({ imagen:urlFoto || null, titulo: o.titulo || g.titulo }, 'pdp-foto');
+      cuadro.querySelector('img')?.setAttribute('loading', 'eager');   // es lo primero que se mira
+      galeria.replaceChildren(cuadro);
+    }
 
     const valorUSD = aUSD(o.precio, o.moneda);
     const fleteUSD = aUSD(o.envio || 0, o.moneda);

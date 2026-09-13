@@ -24,6 +24,8 @@ import { vistaTiendas } from './ui/tiendas.js';
 import { vistaMisCompras } from './ui/ordenes.js';
 import { modo, hayCuenta, refrescarPerfil } from './engine/nube.js';
 import { listarOrdenes } from './engine/ordenes.js';
+import { tiendasActivas } from './connectors/registry.js';
+import { logoTienda } from './ui/components.js';
 
 const NAV = [
   { ruta:'#/',          icono:'casa',     label:'Inicio' },
@@ -110,6 +112,7 @@ function construirShell(){
      porque al abrirse tapa la hamburguesa de la cabecera. */
   const fijar = el('button', { class:'iconbtn btn-fijar', title:'Fijar menú', 'aria-label':'Fijar menú',
                                'aria-pressed':'false', onclick:() => fijarMenu(!menuFijo()) }, ic('pin'));
+  const porTienda = submenuTiendas(ruta => { cerrarMenu(); ir(ruta); });
   const rail = el('aside', { class:'rail' },
     el('div', { class:'rail-head' },
       el('a', { class:'brand brand-full', href:'#/', 'aria-label':'NiJu — inicio',
@@ -117,9 +120,12 @@ function construirShell(){
         logoNiju('logo-rail'),
         el('div', { class:'brand-sub' }, 'compra todo, de todo y para todo')),
       fijar),
-    ...NAV.filter(n => !n.privado || esDueno()).map(n => el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => { cerrarMenu(); ir(n.ruta); } },
-      ic(n.icono), el('span', { class:'spacer' }, n.label),
-      n.ruta === '#/carrito' ? el('span', { class:'tiny mono', data:{ badge:'carrito' } }, '') : null)),
+    ...NAV.filter(n => !n.privado || esDueno()).flatMap(n => {
+      const item = el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => { cerrarMenu(); ir(n.ruta); } },
+        ic(n.icono), el('span', { class:'spacer' }, n.label),
+        n.ruta === '#/carrito' ? el('span', { class:'tiny mono', data:{ badge:'carrito' } }, '') : null);
+      return n.ruta === '#/buscar' ? [item, porTienda.nodo] : [item];
+    }),
     el('div', { class:'rail-foot' },
       el('div', { data:{ fx:'1' } }, ''),
       el('div', { style:{ marginTop:'6px' } }, `v${CONFIG.version} · modo ${CONFIG.modoDatos}`)));
@@ -181,6 +187,8 @@ function construirShell(){
     zona.addEventListener('mouseleave', cerrarPronto);
   }
   document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarMenu(); });
+  /* La portada pide abrir la lista de tiendas desde su atajo. */
+  window.addEventListener('niju:tiendas', () => { abrirMenu(); porTienda.abrir(true); });
   document.addEventListener('pointerdown', e => {
     if (rail.classList.contains('abierto') && !rail.contains(e.target) && !hamburguesa.contains(e.target)) cerrarMenu();
   });
@@ -236,6 +244,49 @@ function contarToques(e){
     e?.preventDefault?.();
     location.hash = '#/entrar';
   }
+}
+
+/* ------------------------------------------------------------------
+   Comprar por tienda, dentro del menú.
+   Un renglón que se despliega con las tiendas conectadas y un
+   buscador chico, porque son muchas. Estando dentro de una tienda,
+   la lista queda abierta y esa tienda marcada.
+   ------------------------------------------------------------------ */
+function submenuTiendas(alElegir){
+  const tiendas = tiendasActivas().filter(t => t.tipo !== 'propio')
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const plano = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  const lista = el('div', { class:'sub-lista' });
+  const filtro = el('input', { class:'sub-filtro', type:'search', placeholder:'Buscar tienda…', 'aria-label':'Buscar tienda' });
+  const pintar = () => {
+    const q = plano(filtro.value.trim());
+    const vistas = tiendas.filter(t => plano(t.nombre).includes(q));
+    lista.replaceChildren(...(vistas.length
+      ? vistas.map(t => el('button', { class:'sub-item', data:{ ruta:`#/tienda/${t.id}` }, onclick:() => alElegir(`#/tienda/${t.id}`) },
+          logoTienda(t.id), el('span', {}, t.nombre)))
+      : [el('div', { class:'sub-vacio' }, 'Ninguna tienda con ese nombre')]));
+    marcarActivo();
+  };
+  filtro.addEventListener('input', pintar);
+
+  const cuerpo = el('div', { class:'sub-cuerpo', hidden:true }, filtro, lista);
+  const cab = el('button', { class:'nav-item', 'aria-expanded':'false', onclick:() => abrir(cuerpo.hidden) },
+    ic('tienda'), el('span', { class:'spacer' }, 'Comprar por tienda'),
+    el('span', { class:'sub-cant' }, String(tiendas.length)), ic('flecha', 'ic sub-flecha'));
+  const nodo = el('div', { class:'sub' }, cab, cuerpo);
+
+  function abrir(si, enfocar = false){
+    cuerpo.hidden = !si;
+    cab.setAttribute('aria-expanded', String(si));
+    nodo.classList.toggle('abierto', si);
+    if (si && enfocar) filtro.focus({ preventScroll:true });
+  }
+  pintar();
+  const seguirRuta = () => { if (location.hash.startsWith('#/tienda/')) abrir(true); };
+  window.addEventListener('hashchange', seguirRuta);
+  seguirRuta();
+  return { nodo, abrir:si => abrir(si, true) };
 }
 
 function marcarActivo(){

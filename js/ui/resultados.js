@@ -2,23 +2,30 @@
    NiJu — Resultados de búsqueda
    Acá vive la promesa: el mismo producto, todas las tiendas,
    ordenado por lo que realmente vas a pagar.
+   Se presenta como un marketplace grande: filtros rápidos en una
+   barra que queda pegada arriba, filtros completos como enlaces a
+   un costado (en el celular, en una hoja), tarjetas que reaccionan
+   y más productos a medida que se baja, sin botón.
    ============================================================ */
-import { el, plata, num, ic, toast } from '../util.js';
+import { el, plata, num, ic, hoja } from '../util.js';
 import { buscar, procesar } from '../engine/search.js';
-import { STORES, STORE_BY_ID, TIPO_META } from '../data/stores.js';
-import { RUBROS, RUBRO_BY_ID } from '../data/catalog.js';
+import { STORE_BY_ID, TIPO_META } from '../data/stores.js';
+import { RUBRO_BY_ID } from '../data/catalog.js';
 import { tiendasActivas } from '../connectors/registry.js';
 import { store, registrarBusqueda } from '../state.js';
-import { filaCluster, barraProgreso, esqueleto, vacio, selectorMoneda } from './components.js';
-import { tirasDeTiendas } from './tienda.js';
+import { filaCluster, vacio, selectorMoneda, logoTienda, foto } from './components.js';
+import { tarjetaResultado, esqueletoGrilla, descuentoDe, cargaInfinita, selectorVista, vistaGuardada } from './vitrina.js';
 
 const ORDENES = [
-  { id:'relevancia', n:'Más relevante' },
-  { id:'precio',     n:'Precio final ↑' },
+  { id:'relevancia', n:'Más relevantes' },
+  { id:'precio',     n:'Menor precio final' },
   { id:'ahorro',     n:'Mayor ahorro' },
   { id:'entrega',    n:'Llega antes' },
-  { id:'tiendas',    n:'Más comparado' }
+  { id:'tiendas',    n:'Más tiendas comparadas' }
 ];
+const INTERRUPTORES = { envioGratis:'Envío gratis', varias:'En varias tiendas', cuotas:'Cuotas sin interés',
+                        sinImpuestos:'Sin costo de importación', mayorista:'Por mayor' };
+const MOVIL = matchMedia('(max-width: 900px)');
 
 export function vistaResultados(params, ir){
   const q     = params.get('q') || '';
@@ -28,8 +35,11 @@ export function vistaResultados(params, ir){
   const filtros = {
     tipos: new Set(),
     tiendas: new Set(soloTienda ? [soloTienda] : []),
+    precioMin: null,
     precioMax: null,
+    descuentoMin: 0,
     envioGratis: false,
+    varias: false,
     cuotas: false,
     sinImpuestos: false,
     mayorista: params.get('mayorista') === '1',
@@ -38,116 +48,192 @@ export function vistaResultados(params, ir){
   };
 
   let datos = null;
-  let pagina = 0, acumulado = [];
+  let pagina = 0, acumulado = [], hayMas = false;
+  let cargando = false, turno = 0;
+  let visibles = [];
+  let vista = vistaGuardada();
+  let conFiltros = true;      // en la computadora, la columna de filtros se puede esconder
+  let hojaFiltros = null;     // en el celular, los filtros van en una hoja
   const POR_PAGINA = 24;
-  const masBoton = el('div', { style:{ marginTop:'16px' } });
 
-  const raiz = el('div', { class:'wrap' });
-  const cabecera = el('div');
-  const progreso = el('div');
-  const panelFiltros = el('aside', { class:'filters cerrado' });
-  const btnFiltros = el('button', { class:'btn btn-sm filtros-toggle', onclick:() => {
-    panelFiltros.classList.toggle('cerrado');
-    btnFiltros.textContent = panelFiltros.classList.contains('cerrado') ? 'Filtrar y ordenar' : 'Ocultar filtros';
-  } }, 'Filtrar y ordenar');
-  const lista = el('div');
-  lista.append(esqueleto(6));
+  /* Los productos de una tienda conectada no tienen id nuestro:
+     los identificamos por su título, que es lo que sí tienen. */
+  const abrir = item => {
+    const clave = item.productoId || item.titulo;
+    if (clave) ir(`#/producto/${encodeURIComponent(clave)}`);
+    else if (item.url) window.open(item.url, '_blank', 'noopener');
+  };
 
-  /* Cuando se entra por rubro, mostramos las tiendas que lo cubren:
-     el cliente puede querer recorrer una sola, no comparar todas. */
-  const tiendasDelRubro = rubro
-    ? tiendasActivas({ rubro }).filter(t => t.tipo !== 'propio')
-    : [];
-
-  raiz.append(el('section', { class:'section', style:{ paddingTop:'20px' } },
-    cabecera,
-    tirasDeTiendas(tiendasDelRubro, ir, `Tiendas de ${RUBRO_BY_ID[rubro]?.nombre || 'este rubro'}`),
-    btnFiltros, progreso,
-    el('div', { class:'res-layout' }, panelFiltros, el('div', {}, lista, masBoton))));
+  const raiz = el('div', { class:'wrap v-res' });
+  const cab = el('header', { class:'v-cab' });
+  const progreso = el('div', { class:'v-progreso' }, el('i'));
+  const toolbar = el('div', { class:'v-toolbar' });
+  const activos = el('div', { class:'v-activos' });
+  const aside = el('aside', { class:'v-filtros', 'aria-label':'Filtros' });
+  const destacados = el('div');
+  const lista = el('div', {}, esqueletoGrilla(8));
+  const infinita = cargaInfinita(() => { if (!cargando && hayMas){ pagina++; cargar({ siguiente:true }); } });
+  const layout = el('div', { class:'v-layout' }, aside, el('div', { class:'v-main' }, destacados, lista, infinita.nodo));
+  raiz.append(cab, progreso, toolbar, activos, layout);
 
   /* ---------- Cabecera ---------- */
+  const hace = el('small');
   function pintarCabecera(){
-    const titulo = q ? `"${q}"` : rubro ? RUBRO_BY_ID[rubro]?.nombre : 'Todas las ofertas';
+    const titulo = q || (rubro ? RUBRO_BY_ID[rubro]?.nombre : 'Todas las ofertas');
     const meta = datos?.meta;
-    cabecera.replaceChildren(
-      el('div', { class:'res-head' },
-        el('div', {},
-          el('div', { class:'kicker' }, rubro ? 'Rubro' : 'Búsqueda comparada'),
-          el('h2', {}, titulo),
-          meta ? el('div', { class:'tiny dim', style:{ marginTop:'5px' } },
-            `${num(meta.ofertas)} ofertas de ${meta.tiendasOk}/${meta.tiendasTotal} tiendas en ${meta.ms} ms · agrupadas en ${datos.grupos.length} productos`) : null,
-          meta ? el('div', { class:'row tiny', style:{ marginTop:'4px', gap:'7px' } },
-            el('i', { style:{ width:'6px', height:'6px', borderRadius:'50%', background:'var(--ok)', display:'inline-block' } }),
-            el('span', { style:{ color:'var(--ok)', fontWeight:'800' } }, 'PRECIOS EN VIVO'),
-            el('span', { class:'dim' }, '· consultados ' + new Date(meta.consultado).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', second:'2-digit' }))) : null),
-        el('div', { class:'row wrapf' },
-          el('button', { class:'btn btn-sm', title:'Volver a preguntarle el precio a cada tienda', onclick:() => cargar(true) }, '↻ Actualizar precios'),
-          selectorMoneda(() => repintar()),
-          el('select', { class:'inp', style:{ width:'auto' }, onchange:e => { filtros.orden = e.target.value; repintar(); } },
-            ...ORDENES.map(o => el('option', { value:o.id, selected:filtros.orden === o.id || null }, o.n))),
-          el('select', { class:'inp', style:{ width:'auto' },
-            onchange:e => { filtros.regimen = e.target.value; recalcular(); } },
-            el('option', { value:'courier', selected:filtros.regimen === 'courier' || null }, 'Courier puerta a puerta'),
-            el('option', { value:'general', selected:filtros.regimen === 'general' || null }, 'Importación formal'))
-        ))
-    );
+    const listo = meta && !cargando;
+    cab.replaceChildren(
+      el('nav', { class:'v-migas', 'aria-label':'Estás en' },
+        el('a', { href:'#/' }, 'Inicio'), ic('der'),
+        el('span', {}, rubro ? 'Categorías' : 'Búsqueda')),
+      el('div', { class:'v-cab-fila' },
+        el('h1', {}, titulo),
+        datos ? el('span', { class:'v-cuenta' }, `${num(visibles.length)} ${visibles.length === 1 ? 'resultado' : 'resultados'}`) : null,
+        el('span', { class:'spacer' }),
+        el('span', { class:'v-vivo' + (listo ? '' : ' esperando'), title:'Cada precio se le pregunta a la tienda en el momento' },
+          el('i'), listo ? `En vivo en ${meta.tiendasOk} tiendas` : 'Consultando tiendas…', listo ? hace : null),
+        el('button', { class:'v-refrescar' + (cargando ? ' girando' : ''), title:'Volver a preguntarle el precio a cada tienda',
+                       'aria-label':'Actualizar precios', onclick:() => cargar({ forzar:true }) }, ic('refrescar'))));
+    actualizarHace();
+  }
+  function actualizarHace(){
+    const t = datos?.meta?.consultado;
+    if (!t) return;
+    const s = Math.round((Date.now() - t) / 1000);
+    hace.textContent = ' · ' + (s < 60 ? `hace ${Math.max(s, 1)} s` : `hace ${Math.round(s / 60)} min`);
   }
 
-  /* ---------- Filtros ---------- */
-  function pintarFiltros(){
-    if (!datos) return;
-    const todas = datos.grupos.flatMap(g => g.ofertas);
-    const porTienda = {}; for (const o of todas) porTienda[o.tiendaId] = (porTienda[o.tiendaId] || 0) + 1;
-    const porTipo = {};   for (const o of todas){ const t = STORE_BY_ID[o.tiendaId]?.tipo; porTipo[t] = (porTipo[t] || 0) + 1; }
+  /* ---------- Barra pegada: filtros rápidos, orden y vista ---------- */
+  function pintarToolbar(){
+    const antes = toolbar.querySelector('.v-chips')?.scrollLeft || 0;
+    const top = Object.entries(contarTiendas()).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id]) => id);
+    for (const id of filtros.tiendas) if (!top.includes(id)) top.unshift(id);   // las elegidas, siempre a la vista
 
-    const gTipo = el('div', { class:'fgroup' }, el('h4', {}, 'Origen'));
-    for (const [k, m] of Object.entries(TIPO_META)){
-      if (!porTipo[k]) continue;
-      gTipo.append(el('label', { class:'fitem' },
-        el('input', { type:'checkbox', checked:filtros.tipos.has(k) || null,
-          onchange:e => { e.target.checked ? filtros.tipos.add(k) : filtros.tipos.delete(k); repintar(); } }),
-        el('span', { style:{ color:m.color, fontWeight:'800' } }, m.label),
-        el('span', { class:'cnt' }, porTipo[k])));
+    const chip = (texto, activo, alHacer, antesDe = null) => el('button', {
+      class:'v-chip' + (activo ? ' on' : ''), 'aria-pressed':String(!!activo), onclick:() => cambiar(alHacer)
+    }, antesDe, texto, activo ? ic('x', 'ic v-chip-x') : null);
+
+    const n = cuantosFiltros();
+    const chips = el('div', { class:'v-chips' },
+      chip('Envío gratis', filtros.envioGratis, () => filtros.envioGratis = !filtros.envioGratis),
+      chip('Con descuento', filtros.descuentoMin > 0, () => filtros.descuentoMin = filtros.descuentoMin ? 0 : 10),
+      chip('En varias tiendas', filtros.varias, () => filtros.varias = !filtros.varias),
+      ...top.map(id => chip(STORE_BY_ID[id]?.nombre || id, filtros.tiendas.has(id), () => alternar(filtros.tiendas, id), logoTienda(id))));
+
+    toolbar.replaceChildren(
+      el('button', { class:'v-btn-filtros' + (!MOVIL.matches && conFiltros ? ' on' : ''), onclick:abrirFiltros },
+        ic('filtro'), 'Filtros', n ? el('b', {}, String(n)) : null),
+      chips,
+      el('label', { class:'v-orden' }, el('span', {}, 'Ordenar por'),
+        el('select', { onchange:e => cambiar(() => filtros.orden = e.target.value) },
+          ...ORDENES.map(o => el('option', { value:o.id, selected:filtros.orden === o.id || null }, o.n)))),
+      selectorVista(vista, v => { vista = v; pintarLista(); }));
+    chips.scrollLeft = antes;
+  }
+
+  function abrirFiltros(){
+    if (!MOVIL.matches){
+      conFiltros = !conFiltros;
+      layout.classList.toggle('sin-filtros', !conFiltros);
+      pintarToolbar();
+      return;
     }
+    const cont = el('div');
+    hojaFiltros = { cont, ...hoja({ titulo:'Filtrar', cuerpo:cont, alCerrar:() => { hojaFiltros = null; } }) };
+    pintarFiltros();
+  }
 
-    const gTienda = el('div', { class:'fgroup' }, el('h4', {}, 'Tienda'));
-    Object.entries(porTienda).sort((a,b) => b[1] - a[1]).forEach(([id, n]) => {
-      gTienda.append(el('label', { class:'fitem' },
-        el('input', { type:'checkbox', checked:filtros.tiendas.has(id) || null,
-          onchange:e => { e.target.checked ? filtros.tiendas.add(id) : filtros.tiendas.delete(id); repintar(); } }),
-        el('span', {}, STORE_BY_ID[id]?.nombre || id),
-        el('span', { class:'cnt' }, n)));
-    });
+  /* ---------- Filtros aplicados ---------- */
+  function pintarActivos(){
+    const p = [];
+    const pastilla = (texto, quitar) => p.push(el('button', { class:'v-activo', title:'Quitar este filtro', onclick:() => cambiar(quitar) }, texto, ic('x')));
+    for (const k of filtros.tipos) pastilla(TIPO_META[k]?.label || k, () => filtros.tipos.delete(k));
+    for (const id of filtros.tiendas) pastilla(STORE_BY_ID[id]?.nombre || id, () => filtros.tiendas.delete(id));
+    if (filtros.precioMin || filtros.precioMax) pastilla(textoRango(filtros.precioMin, filtros.precioMax), () => { filtros.precioMin = filtros.precioMax = null; });
+    if (filtros.descuentoMin) pastilla(`${filtros.descuentoMin}% OFF o más`, () => filtros.descuentoMin = 0);
+    for (const [k, nombre] of Object.entries(INTERRUPTORES)) if (filtros[k]) pastilla(nombre, () => filtros[k] = false);
+    if (p.length > 1) p.push(el('button', { class:'v-limpiar', onclick:() => cambiar(limpiar) }, 'Limpiar todo'));
+    activos.replaceChildren(...p);
+  }
 
-    const precios = datos.grupos.map(g => g.mejor.costo.finalARS).sort((a,b) => a - b);
-    const max = precios[precios.length - 1] || 0;
-    const slider = el('input', { type:'range', min:0, max:String(max), value:String(filtros.precioMax ?? max),
-      style:{ width:'100%', accentColor:'var(--win)' },
-      oninput:e => { filtros.precioMax = +e.target.value; lblPrecio.textContent = 'hasta ' + plata(+e.target.value); },
-      onchange:repintar });
-    const lblPrecio = el('span', { class:'tiny mono' }, filtros.precioMax ? 'hasta ' + plata(filtros.precioMax) : 'sin tope');
+  function limpiar(){
+    filtros.tipos.clear(); filtros.tiendas.clear();
+    filtros.precioMin = filtros.precioMax = null; filtros.descuentoMin = 0;
+    for (const k of Object.keys(INTERRUPTORES)) filtros[k] = false;
+  }
 
-    const gPrecio = el('div', { class:'fgroup' }, el('h4', {}, 'Precio final'), slider,
-      el('div', { class:'row-b tiny dim' }, el('span', {}, plata(0)), lblPrecio));
+  /* ---------- Filtros completos ---------- */
+  function armarFiltros(){
+    if (!datos) return el('div', {}, el('div', { class:'v-sk', style:{ height:'160px' } }));
+    const porTienda = contarTiendas();
+    const porTipo = {};
+    for (const g of datos.grupos) for (const o of g.ofertas){ const t = STORE_BY_ID[o.tiendaId]?.tipo; porTipo[t] = (porTipo[t] || 0) + 1; }
 
-    const gExtra = el('div', { class:'fgroup' }, el('h4', {}, 'Condiciones'),
-      chk('Envío gratis', 'envioGratis'),
-      chk('Con cuotas sin interés verificadas', 'cuotas'),
-      chk('Sin costo de importación', 'sinImpuestos'),
-      chk('Solo por mayor', 'mayorista'));
+    const grupo = (titulo, ...hijos) => el('div', { class:'v-fgrupo' }, el('h4', {}, titulo), ...hijos);
+    const opcion = (texto, activo, alHacer, cuenta, antesDe = null) => el('button', {
+      class:'v-fop' + (activo ? ' on' : ''), 'aria-pressed':String(!!activo), onclick:() => cambiar(alHacer)
+    }, antesDe, el('span', { class:'spacer' }, texto), cuenta != null ? el('small', {}, num(cuenta)) : null);
+    const interruptor = clave => el('label', { class:'v-switch' }, el('span', {}, INTERRUPTORES[clave]),
+      el('input', { type:'checkbox', checked:filtros[clave] || null, onchange:() => cambiar(() => filtros[clave] = !filtros[clave]) }),
+      el('i'));
 
-    const gLimpiar = el('button', { class:'btn btn-block', onclick:() => {
-      filtros.tipos.clear(); filtros.tiendas.clear(); filtros.precioMax = null;
-      filtros.envioGratis = filtros.cuotas = filtros.sinImpuestos = filtros.mayorista = false;
-      pintarFiltros(); repintar();
-    } }, 'Limpiar filtros');
+    /* Tiendas: las seis que más traen y el resto a pedido */
+    const ordenT = Object.entries(porTienda).sort((a, b) => b[1] - a[1]);
+    let todas = false;
+    const listaT = el('div');
+    const pintarT = () => listaT.replaceChildren(
+      ...ordenT.slice(0, todas ? ordenT.length : 6).map(([id, n]) =>
+        opcion(STORE_BY_ID[id]?.nombre || id, filtros.tiendas.has(id), () => alternar(filtros.tiendas, id), n, logoTienda(id))),
+      ...(ordenT.length > 6 ? [el('button', { class:'p-link', onclick:() => { todas = !todas; pintarT(); } },
+        todas ? 'Ver menos' : `Ver las ${ordenT.length} tiendas`)] : []));
+    pintarT();
 
-    panelFiltros.replaceChildren(gTipo, gPrecio, gTienda, gExtra, gLimpiar);
+    /* Precio: tres tramos armados con los precios de esta búsqueda */
+    const precios = datos.grupos.map(g => g.mejor.costo.finalARS).sort((a, b) => a - b);
+    const redondo = n => { const p = 10 ** Math.max(2, Math.floor(Math.log10(n || 1)) - 1); return Math.round(n / p) * p; };
+    const c1 = redondo(precios[Math.floor(precios.length / 3)]);
+    const c2 = redondo(precios[Math.floor(precios.length * 2 / 3)]);
+    const tramos = precios.length >= 6 && c1 < c2 ? [[null, c1], [c1, c2], [c2, null]] : [];
+    const enTramo = (min, max) => precios.filter(p => (!min || p >= min) && (!max || p <= max)).length;
+    const inMin = el('input', { type:'number', inputmode:'numeric', placeholder:'Mínimo', 'aria-label':'Precio mínimo', value:filtros.precioMin ?? '' });
+    const inMax = el('input', { type:'number', inputmode:'numeric', placeholder:'Máximo', 'aria-label':'Precio máximo', value:filtros.precioMax ?? '' });
+    const aplicarRango = () => cambiar(() => { filtros.precioMin = +inMin.value || null; filtros.precioMax = +inMax.value || null; });
+    for (const i of [inMin, inMax]) i.addEventListener('keydown', e => { if (e.key === 'Enter') aplicarRango(); });
 
-    function chk(label, key){
-      return el('label', { class:'fitem' },
-        el('input', { type:'checkbox', checked:filtros[key] || null, onchange:e => { filtros[key] = e.target.checked; repintar(); } }),
-        el('span', {}, label));
+    const descuentos = [10, 25, 40]
+      .map(x => [x, datos.grupos.filter(g => g.ofertas.some(o => descuentoDe(o) >= x)).length])
+      .filter(([, n]) => n);
+    const tipos = Object.keys(TIPO_META).filter(k => porTipo[k]);
+
+    return el('div', {},
+      grupo('Envío y condiciones', ...Object.keys(INTERRUPTORES).map(interruptor)),
+      descuentos.length ? grupo('Descuentos', ...descuentos.map(([x, n]) =>
+        opcion(`${x}% OFF o más`, filtros.descuentoMin === x, () => filtros.descuentoMin = filtros.descuentoMin === x ? 0 : x, n))) : null,
+      grupo('Precio final',
+        ...tramos.map(([min, max]) => {
+          const activo = filtros.precioMin === min && filtros.precioMax === max;
+          return opcion(textoRango(min, max), activo, () => { filtros.precioMin = activo ? null : min; filtros.precioMax = activo ? null : max; }, enTramo(min, max));
+        }),
+        el('div', { class:'v-rango' }, inMin, '–', inMax,
+          el('button', { 'aria-label':'Aplicar precio', onclick:aplicarRango }, ic('der')))),
+      grupo('Tiendas', listaT),
+      tipos.length > 1 ? grupo('Origen', ...tipos.map(k =>
+        opcion(TIPO_META[k].label, filtros.tipos.has(k), () => alternar(filtros.tipos, k), porTipo[k]))) : null,
+      grupo('Cómo ver los precios',
+        selectorMoneda(() => repintar()),
+        el('div', { class:'v-segmento' }, ...[['courier', 'Courier puerta a puerta'], ['general', 'Importación formal']].map(([id, texto]) =>
+          el('button', { class:'v-chip' + (filtros.regimen === id ? ' on' : ''), onclick:() => { filtros.regimen = id; recalcular(); } }, texto)))));
+  }
+
+  function pintarFiltros(){
+    const scroll = aside.scrollTop;
+    aside.replaceChildren(armarFiltros());
+    aside.scrollTop = scroll;
+    if (hojaFiltros?.cont.isConnected){
+      hojaFiltros.cont.replaceChildren(armarFiltros(),
+        el('div', { class:'v-hoja-pie' },
+          el('button', { class:'btn btn-win btn-lg btn-block', onclick:() => hojaFiltros.cerrar() },
+            `Ver ${num(visibles.length)} resultados`)));
     }
   }
 
@@ -161,19 +247,22 @@ export function vistaResultados(params, ir){
       if (filtros.cuotas)       ofertas = ofertas.filter(o => o.cuotas >= 3 && (o.demo === false ? !!o.cuotaValor : true));
       if (filtros.sinImpuestos) ofertas = ofertas.filter(o => !o.costo.impuestosARS);
       if (filtros.mayorista)    ofertas = ofertas.filter(o => o.mayorista);
+      if (filtros.descuentoMin) ofertas = ofertas.filter(o => descuentoDe(o) >= filtros.descuentoMin);
+      if (filtros.precioMin)    ofertas = ofertas.filter(o => o.costo.finalARS >= filtros.precioMin);
       if (filtros.precioMax)    ofertas = ofertas.filter(o => o.costo.finalARS <= filtros.precioMax);
       if (!ofertas.length) return null;
+      const tiendas = new Set(ofertas.map(o => o.tiendaId)).size;
+      if (filtros.varias && tiendas < 2) return null;
       const mejor = ofertas[0], peor = ofertas[ofertas.length - 1];
-      return { ...g, ofertas, mejor, peor,
+      return { ...g, ofertas, mejor, peor, tiendas,
         ahorro:Math.max(0, peor.costo.finalARS - mejor.costo.finalARS),
-        ahorroPct: peor.costo.finalARS ? Math.round((1 - mejor.costo.finalARS / peor.costo.finalARS) * 100) : 0,
-        tiendas:new Set(ofertas.map(o => o.tiendaId)).size };
+        ahorroPct: peor.costo.finalARS ? Math.round((1 - mejor.costo.finalARS / peor.costo.finalARS) * 100) : 0 };
     }).filter(Boolean);
   }
 
-  function repintar(){
-    if (!datos) return;
-    let g = aplicar(datos.grupos);
+  function repintar(animar = true){
+    if (!datos){ pintarCabecera(); pintarToolbar(); return; }
+    const g = aplicar(datos.grupos);
     const o = filtros.orden;
     g.sort((a,b) =>
       o === 'precio'  ? a.mejor.costo.finalARS - b.mejor.costo.finalARS :
@@ -181,91 +270,123 @@ export function vistaResultados(params, ir){
       o === 'entrega' ? a.mejor.entregaDias[0] - b.mejor.entregaDias[0] :
       o === 'tiendas' ? b.tiendas - a.tiendas :
       (b.rel * 2 + b.demanda / 10) - (a.rel * 2 + a.demanda / 10));
+    visibles = g;
 
-    pintarCabecera();
-    if (!g.length){ lista.replaceChildren(sinResultados(datos, q, ir, rubro)); return; }
-
-    const resumen = el('div', { class:'card', style:{ marginBottom:'14px', borderColor:'var(--win)' } },
-      el('div', { class:'row-b wrapf' },
-        el('div', {},
-          el('div', { class:'kicker' }, 'Resumen de la comparación'),
-          el('div', { style:{ fontWeight:'800', fontSize:'15px' } },
-            `${g.length} productos · ahorro máximo ${plata(Math.max(...g.map(x => x.ahorro)))}`)),
-        el('div', { class:'row wrapf' },
-          mini('El más barato', plata(Math.min(...g.map(x => x.mejor.costo.finalARS)))),
-          mini('Tiendas', String(new Set(g.flatMap(x => x.ofertas.map(o => o.tiendaId))).size)),
-          mini('Régimen', filtros.regimen === 'courier' ? 'Courier' : 'Formal'))));
-
-    const cont = el('div');
-    g.slice(0, 60).forEach((x, i) => cont.append(filaCluster(x, {
-      abierto: i === 0,
-      onVerFicha: item => {
-        /* Los productos de una tienda conectada no tienen id nuestro:
-           los identificamos por su título, que es lo que sí tienen. */
-        const clave = item.productoId || item.titulo;
-        if (clave) ir(`#/producto/${encodeURIComponent(clave)}`);
-        else if (item.url) window.open(item.url, '_blank', 'noopener');
-      }
-    })));
-    lista.replaceChildren(resumen, cont);
+    pintarCabecera(); pintarToolbar(); pintarActivos();
+    if (!g.length){ destacados.replaceChildren(); lista.replaceChildren(sinResultados(datos, q, ir, rubro)); return; }
+    destacados.replaceChildren(franjaDestacados(g, abrir) || '');
+    pintarLista(animar);
   }
+
+  function pintarLista(animar = true){
+    if (!visibles.length) return;
+    lista.replaceChildren(vista === 'lista'
+      ? el('div', {}, ...visibles.map((x, i) => filaCluster(x, { abierto:i === 0, onVerFicha:abrir })))
+      : el('div', { class:'v-grilla' + (animar ? '' : ' quieta') }, ...visibles.map(x => tarjetaResultado(x, { abrir }))));
+  }
+
+  function cambiar(fn){ fn(); repintar(); pintarFiltros(); }
+  const alternar = (conjunto, v) => conjunto.has(v) ? conjunto.delete(v) : conjunto.add(v);
+  function contarTiendas(){
+    const c = {};
+    for (const g of datos?.grupos || []) for (const o of g.ofertas) c[o.tiendaId] = (c[o.tiendaId] || 0) + 1;
+    return c;
+  }
+  const cuantosFiltros = () => filtros.tipos.size + filtros.tiendas.size
+    + (filtros.precioMin || filtros.precioMax ? 1 : 0) + (filtros.descuentoMin ? 1 : 0)
+    + Object.keys(INTERRUPTORES).filter(k => filtros[k]).length;
 
   function recalcular(){
     if (!datos?.crudo) return;
     datos = { ...procesar(datos.crudo, q, { regimen:filtros.regimen, orden:filtros.orden }), crudo:datos.crudo, meta:datos.meta };
-    repintar();
+    repintar(); pintarFiltros();
   }
 
   /* ---------- Carga ---------- */
   if (q) registrarBusqueda(q);
-  pintarCabecera();
 
-  function cargar(forzar = false, siguiente = false){
-  if (forzar){ pagina = 0; acumulado = []; lista.replaceChildren(esqueleto(6)); masBoton.replaceChildren(); }
-  if (siguiente) masBoton.replaceChildren(el('div', { class:'card center tiny dim', style:{ padding:'14px' } }, 'Buscando más…'));
-  buscar(q, { rubro, mayorista:filtros.mayorista, regimen:filtros.regimen, orden:filtros.orden, forzar,
-              desde: pagina * POR_PAGINA, limite: POR_PAGINA },
-    est => {
-      progreso.replaceChildren(barraProgreso(est.tiendas));
-      if (est.listo) setTimeout(() => progreso.replaceChildren(
-        el('div', { class:'tiny dim', style:{ marginBottom:'12px' } },
-          `Consultamos ${est.tiendas.length} tiendas · ${est.tiendas.filter(t => t.estado === 'fail').length} no respondieron`)), 900);
-    })
+  /* forzar: vuelve a preguntar desde la primera página.
+     siguiente: suma la página que sigue al pie.
+     callado: refresca sin tapar la lista con el esqueleto. */
+  function cargar({ forzar = false, siguiente = false, callado = false } = {}){
+    const mio = ++turno;   // si llega una respuesta vieja, se descarta
+    cargando = true;
+    if (forzar){
+      pagina = 0; acumulado = []; hayMas = false;
+      if (!callado){ lista.replaceChildren(esqueletoGrilla(8)); destacados.replaceChildren(); }
+    }
+    infinita.estado(siguiente ? 'buscando' : 'oculto');
+    progreso.classList.remove('listo');
+    progreso.firstChild.style.width = '4%';
+    pintarCabecera();
+
+    buscar(q, { rubro, mayorista:filtros.mayorista, regimen:filtros.regimen, orden:filtros.orden, forzar,
+                desde: pagina * POR_PAGINA, limite: POR_PAGINA },
+      est => {
+        if (mio !== turno) return;
+        const contestaron = est.tiendas.filter(t => t.estado !== 'run').length;
+        progreso.firstChild.style.width = Math.max(4, est.tiendas.length ? contestaron / est.tiendas.length * 100 : 100) + '%';
+        if (est.listo) progreso.classList.add('listo');
+      })
     .then(res => {
+      if (mio !== turno) return;
       const vistos = new Set(acumulado.map(g => g.clave));
       const nuevos = res.grupos.filter(g => !vistos.has(g.clave));
       acumulado = acumulado.concat(nuevos);
       datos = { ...res, grupos:acumulado, crudo: acumulado.flatMap(g => g.ofertas) };
+      hayMas = nuevos.length > 0 && res.meta?.hayMas !== false;
+      cargando = false;
+      repintar(!siguiente && !callado);
       pintarFiltros();
-      repintar();
-
-      if (nuevos.length && res.meta?.hayMas !== false){
-        masBoton.replaceChildren(el('button', {
-          class:'btn btn-win btn-block btn-lg',
-          onclick:() => { pagina++; cargar(false, true); }
-        }, 'Ver más resultados'));
-      } else {
-        masBoton.replaceChildren(acumulado.length
-          ? el('div', { class:'card center tiny dim', style:{ padding:'14px' } },
-              `Llegaste al final: ${acumulado.length} productos comparados.`)
-          : el('div'));
-      }
+      infinita.estado(hayMas ? 'espera' : acumulado.length ? 'fin' : 'oculto', acumulado.length);
     })
-    .catch(e => { lista.replaceChildren(vacio('Se cayó la búsqueda', String(e.message || e))); });
+    .catch(e => {
+      if (mio !== turno) return;
+      cargando = false;
+      pintarCabecera();
+      lista.replaceChildren(vacio('Se cayó la búsqueda', String(e.message || e)));
+      infinita.estado('oculto');
+    });
   }
+
+  pintarCabecera(); pintarToolbar(); pintarFiltros();
   cargar();
 
-  /* Refresco automático mientras la pestaña esté a la vista */
-  const reloj = setInterval(() => { if (!document.hidden && document.body.contains(raiz)) cargar(true); }, 120000);
-  new MutationObserver(() => { if (!document.body.contains(raiz)) clearInterval(reloj); })
-    .observe(document.body, { childList:true, subtree:true });
+  /* El "hace X s" corre solo, y cada dos minutos se refrescan los
+     precios. Solo mirando la primera página: recargar con el cliente
+     en la tercera lo mandaría de vuelta arriba. */
+  const reloj = setInterval(() => {
+    if (!raiz.isConnected){ clearInterval(reloj); return; }
+    actualizarHace();
+    const consultado = datos?.meta?.consultado;
+    if (consultado && !document.hidden && !cargando && pagina === 0 && scrollY < 400 && Date.now() - consultado > 120000)
+      cargar({ forzar:true, callado:true });
+  }, 5000);
 
   return raiz;
 }
 
-const mini = (k, v) => el('div', { style:{ textAlign:'right' } },
-  el('div', { class:'kicker' }, k),
-  el('div', { style:{ fontWeight:'900', fontSize:'16px' } }, v));
+const textoRango = (min, max) =>
+  min && max ? `${plata(min)} a ${plata(max)}` : max ? `Hasta ${plata(max)}` : `Más de ${plata(min)}`;
+
+/** Tres atajos arriba de la lista: lo más barato, lo más rebajado y lo
+    más comparado de esta búsqueda. */
+function franjaDestacados(g, abrir){
+  if (g.length < 4) return null;
+  const barato = g.reduce((a, b) => b.mejor.costo.finalARS < a.mejor.costo.finalARS ? b : a);
+  const rebaja = g.reduce((a, b) => descuentoDe(b.mejor) > descuentoDe(a.mejor) ? b : a);
+  const comparado = g.reduce((a, b) => b.tiendas > a.tiendas ? b : a);
+  const items = [
+    ['Precio más bajo', barato, plata(barato.mejor.costo.finalARS)],
+    descuentoDe(rebaja.mejor) >= 10 ? ['Mayor descuento', rebaja, `${descuentoDe(rebaja.mejor)}% OFF`] : null,
+    comparado.tiendas > 1 ? ['Más comparado', comparado,
+      comparado.ahorro > 0 ? `${comparado.tiendas} tiendas · ahorrás ${plata(comparado.ahorro)}` : `${comparado.tiendas} tiendas`] : null
+  ].filter(Boolean);
+  return el('div', { class:'v-destacados' }, ...items.map(([k, x, v]) =>
+    el('button', { class:'v-dest', onclick:() => abrir(x) },
+      foto(x, 'v-dest-foto'),
+      el('span', {}, el('small', {}, k), el('b', {}, v), el('span', { class:'v-dest-tit' }, x.titulo)))));
+}
 
 
 /* ------------------------------------------------------------------

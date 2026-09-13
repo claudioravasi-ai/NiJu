@@ -101,6 +101,7 @@ export function ic(nombre, cls = 'ic'){
     filtro:'M22 3H2l8 9.5V19l4 2v-8.5L22 3Z',
     check:'m20 6-11 11-5-5',
     x:'M18 6 6 18M6 6l12 12',
+    salir:'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
     menu:'M3 6h18M3 12h18M3 18h18',
     pin:'M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z',
     alerta:'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
@@ -110,7 +111,11 @@ export function ic(nombre, cls = 'ic'){
     estrella:'m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1L12 2Z',
     sol:'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
     luna:'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
-    imagen:'M3 3h18v18H3zM3 16l5-5 4 4 3-3 6 6M9 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z'
+    imagen:'M3 3h18v18H3zM3 16l5-5 4 4 3-3 6 6M9 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z',
+    izq:'m15 18-6-6 6-6',
+    der:'m9 18 6-6-6-6',
+    tienda:'M3 9 4.5 4h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6',
+    refrescar:'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6'
   };
   const d = P[nombre] || P.x;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');

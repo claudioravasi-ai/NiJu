@@ -5,7 +5,7 @@ export const CONFIG = {
   nombre: 'NiJu',
   claim: 'Comprá todo, de todo y para todo.',
   claimLargo: 'Un solo lugar. Una app. El mundo a tus dedos: sin trámites, sin riesgos, del deseo a tu casa.',
-  version: '0.2.0',
+  version: '0.2.2',
 
   /* ---------------- Identidad visual ----------------
      El logo de la cabecera y del menú (emblema de bolsa + "NiJu") está
