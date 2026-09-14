@@ -18,9 +18,18 @@
      GET  /v1/campanias            ← compra grupal y preventa, compartidas
      POST /v1/campanias            ← crear
      POST /v1/campanias/:id/reservar
-     GET  /v1/demanda              ← bolsa de demanda
-     POST /v1/demanda              ← publicar una demanda
-     POST /v1/demanda/:id/ofertar  ← un proveedor se ofrece a llenarla
+     GET  /v1/demanda              ← pedidos abiertos ("Pedí y que compitan"), sin datos del cliente
+     POST /v1/demanda              ← publicar un pedido (cliente con cuenta)
+     GET  /v1/demanda/mias         ← mis pedidos, con ofertas y avisos
+     POST /v1/demanda/:id/ofertar  ← oferta de un proveedor aprobado (x-niju-proveedor) o de NiJu
+     POST /v1/demanda/:id/aceptar  ← el cliente acepta una oferta: se crea el pedido de compra
+     POST /v1/demanda/:id/cerrar · POST /v1/demanda/:id/leido
+     GET  /v1/demanda/proveedor    ← valida el código de un proveedor
+     GET  /v1/demanda/mis-ofertas  ← lo que ofertó un cliente como vendedor
+     GET  /v1/demanda/foto/:id     ← foto de la oferta de un particular
+     POST /v1/solicitudes          ← consulta de "Vendé al mundo" o presupuesto de app/web (público, 10 por IP por día)
+     GET  /v1/solicitudes · POST /v1/solicitudes/:id/atendida   (solo el dueño)
+     GET/POST /v1/demanda/proveedores · POST /v1/demanda/proveedores/:id/baja  (solo el dueño)
      GET  /v1/estado               ← qué tiene encendido el servidor (base, cuentas, emails)
      GET  /v1/variantes?tienda=&id=&url=   ← talles, colores y stock de un producto
      POST /v1/clientes/registro · POST /v1/clientes/entrar · GET/PUT /v1/clientes/yo
@@ -34,6 +43,15 @@
      ALI_APP_KEY, ALI_APP_SECRET, ALI_TRACKING_ID
      ORIGENES              (dominios permitidos, separados por coma)
      ADMIN_TOKEN           (clave del dueño: sin esto nadie crea campañas)
+     ANTHROPIC_API_KEY     (asistente: clasifica la NCM y responde preguntas.
+                            Sin esta clave la app usa la búsqueda por palabras
+                            y el glosario, y lo dice)
+
+   Más endpoints:
+     POST /v1/asesor       ← { accion:'clasificar', titulo, descripcion } o
+                             { accion:'preguntar', pregunta, contexto, historial }
+     GET  /v1/arancel.zip  ← copia del Arancel Integrado de ARCA, por si ARCA
+                             no responde al navegador
    ============================================================ */
 
 const TTL = 600;                    // 10 minutos de cache por consulta
@@ -48,7 +66,7 @@ export default {
     if (url.pathname === '/v1/admin/verificar')   return verificarAdmin(req, env, cors);
     if (url.pathname.startsWith('/v1/campanias')) return campanias(req, url, env, cors);
     if (url.pathname.startsWith('/v1/promos'))    return promos(req, url, env, cors);
-    if (url.pathname.startsWith('/v1/demanda'))   return demanda(req, url, env, cors);
+    if (url.pathname.startsWith('/v1/demanda'))   return demanda(req, url, env, ctx, cors);
 
     try{
       if (url.pathname === '/v1/estado')           return estadoServidor(env, cors);
@@ -60,6 +78,9 @@ export default {
       if (url.pathname.startsWith('/v1/salud/')) return salud(url.pathname.split('/').pop(), env, cors);
       if (url.pathname === '/v1/buscar')   return buscar(url, env, ctx, cors);
       if (url.pathname === '/v1/resolver') return resolver(url, env, ctx, cors);
+      if (url.pathname === '/v1/asesor')   return await asesor(req, env, cors);
+      if (url.pathname.startsWith('/v1/solicitudes')) return await solicitudes(req, url, env, cors);
+      if (url.pathname === '/v1/arancel.zip') return await arancelZip(cors);
       return json({ error:'ruta desconocida' }, cors, 404);
     }catch(e){
       return json({ error:String(e.message || e) }, cors, 500);
@@ -76,7 +97,7 @@ function corsHeaders(req, env){
   return {
     'Access-Control-Allow-Origin': ok ? (origen || '*') : 'null',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-    'Access-Control-Allow-Headers': 'accept,content-type,x-niju-admin,authorization',
+    'Access-Control-Allow-Headers': 'accept,content-type,x-niju-admin,x-niju-proveedor,authorization',
     'Cache-Control': `public, max-age=${TTL}`
   };
 }
@@ -175,6 +196,7 @@ function estadoServidor(env, cors){
   return json({
     ok:true, version:3, promos:true,
     base: !!env.NIJU,
+    asesor: !!env.ANTHROPIC_API_KEY,
     cuentas: !!(env.NIJU && secretoSesion(env)),
     emails: !!(env.RESEND_API_KEY && env.AVISOS_DESDE)
   }, sinCache(cors));
@@ -372,6 +394,30 @@ function unir(viejos = [], nuevos = [], clave){
   return [...m.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));
 }
 
+/* Crea un pedido de compra "pendiente de pago" a nombre del cliente.
+   La usan el carrito (/v1/ordenes) y "Pedí y que compitan" al aceptar una oferta. */
+async function nuevaOrden(env, ctx, cliente, o, nota = 'Pedido recibido. Falta acreditar el pago.'){
+  const p = cliente.perfil;
+  const ahora = Date.now();
+  const orden = {
+    ...o,
+    id:'OR-' + ahora.toString(36).toUpperCase() + '-' + crypto.randomUUID().slice(0, 4).toUpperCase(),
+    creada:ahora,
+    cliente:{ email:cliente.email, nombre:`${p.nombre} ${p.apellido}`.trim(), dni:p.dni, cuit:p.cuit,
+              telefono:p.telefono, perfilFiscal:p.perfilFiscal, razonSocial:p.razonSocial || null },
+    direccion:{ ...p.domicilio },
+    estado:'pendiente_pago',
+    historia:[{ ts:ahora, estado:'pendiente_pago', nota }],
+    avisos:[], respuestas:[]
+  };
+  await grabarKV(env, 'orden:' + orden.id, orden);
+  const indice = (await leerKV(env, 'cliord:' + cliente.email)) || [];
+  await grabarKV(env, 'cliord:' + cliente.email, [...indice, orden.id]);
+  avisarPorEmail(env, ctx, orden, [{ titulo:'Recibimos tu pedido ' + orden.id,
+    texto:'Te contactamos para coordinar el pago. Apenas se acredite, salimos a comprar.' }]);
+  return orden;
+}
+
 async function rutaOrdenes(req, url, env, ctx, cors){
   const h = sinCache(cors);
   if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
@@ -394,24 +440,7 @@ async function rutaOrdenes(req, url, env, ctx, cors){
     const o = (await req.json().catch(() => ({}))).orden || {};
     if (!Array.isArray(o.tramos) || !o.tramos.length || o.tramos.length > 30)
       return json({ error:'La orden no tiene productos.' }, h, 400);
-    const p = cliente.perfil;
-    const ahora = Date.now();
-    const orden = {
-      ...o,
-      id:'OR-' + ahora.toString(36).toUpperCase() + '-' + crypto.randomUUID().slice(0, 4).toUpperCase(),
-      creada:ahora,
-      cliente:{ email:cliente.email, nombre:`${p.nombre} ${p.apellido}`.trim(), dni:p.dni, cuit:p.cuit,
-                telefono:p.telefono, perfilFiscal:p.perfilFiscal, razonSocial:p.razonSocial || null },
-      direccion:{ ...p.domicilio },
-      estado:'pendiente_pago',
-      historia:[{ ts:ahora, estado:'pendiente_pago', nota:'Pedido recibido. Falta acreditar el pago.' }],
-      avisos:[], respuestas:[]
-    };
-    await grabarKV(env, 'orden:' + orden.id, orden);
-    const indice = (await leerKV(env, 'cliord:' + cliente.email)) || [];
-    await grabarKV(env, 'cliord:' + cliente.email, [...indice, orden.id]);
-    avisarPorEmail(env, ctx, orden, [{ titulo:'Recibimos tu pedido ' + orden.id,
-      texto:'Te contactamos para coordinar el pago. Apenas se acredite, salimos a comprar en cada tienda.' }]);
+    const orden = await nuevaOrden(env, ctx, cliente, o);
     return json({ ok:true, orden }, h);
   }
 
@@ -722,53 +751,241 @@ async function campanias(req, url, env, cors){
    definición: una demanda que solo ve quien la publicó no sirve
    para nada.
    ============================================================ */
-async function demanda(req, url, env, cors){
-  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU', ordenes:[] }, cors, 501);
-  const partes = url.pathname.split('/').filter(Boolean);   // v1, demanda, [id], [accion]
-  const id = partes[2], accion = partes[3];
+/* ============================================================
+   "PEDÍ Y QUE COMPITAN" — bolsa de demanda
+   · Publica solo un cliente con cuenta: el pedido queda atado a su email.
+   · Ofertan solo proveedores aprobados por el dueño (con su código) y NiJu.
+   · Cada oferta le deja un aviso al cliente (campanita).
+   · El cliente acepta una oferta y se crea su pedido de compra.
+   · Sin seña: no se muestra lo que todavía no se puede cobrar.
+   KV: 'demanda' (pedidos) y 'proveedores' (aprobados, código con HMAC).
+   ============================================================ */
+const MAX_PEDIDOS = 500;
+const COMISION_PARTICULAR = 0.04;     // la cobra NiJu al que vende sin ser proveedor. Mismo valor en js/engine/demanda.js
+const ESTADOS_PRODUCTO = ['nuevo', 'usado', 'reacondicionado'];
+const ofertaPublica = ({ id, proveedor, precio, cantidad, plazoDias, notas, ts, tipo, estadoProducto, condicion, foto }) =>
+  ({ id, proveedor, precio, cantidad, plazoDias, notas, ts, tipo:tipo || 'proveedor',
+     estadoProducto:estadoProducto || null, condicion:condicion || '', foto:!!foto });
 
-  const leer   = async () => JSON.parse(await env.NIJU.get('demanda') || '[]');
-  const grabar = async (os) => env.NIJU.put('demanda', JSON.stringify(os));
+const pedidoPublico = o => ({
+  id:o.id, titulo:o.titulo, detalle:o.detalle || '', rubro:o.rubro || null, imagen:o.imagen || null,
+  precioMax:o.precioMax, cantidad:o.cantidad, autor:o.autor || 'Cliente', creada:o.creada, vence:o.vence,
+  estado:o.estado || 'abierta',
+  ofertas:(o.ofertas || []).map(ofertaPublica)
+});
 
-  if (req.method === 'GET'){
-    const os = await leer();
-    return json({ ordenes: id ? os.filter(o => o.id === id) : os }, cors);
-  }
+async function demanda(req, url, env, ctx, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU', pedidos:[] }, h, 501);
+  try{
+    const [, , id, accion, sub] = url.pathname.split('/').filter(Boolean);
+    const dueno = esDueno(req, env);
+    const texto = (v, n) => String(v ?? '').trim().slice(0, n);
+    const cuerpo = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const leer = async () => (await leerKV(env, 'demanda')) || [];
+    const grabar = os => grabarKV(env, 'demanda', os.slice(-MAX_PEDIDOS));
+    const abierta = o => (o.estado || 'abierta') === 'abierta' && o.vence > Date.now();
 
-  if (req.method === 'POST'){
-    const cuerpo = await req.json().catch(() => ({}));
-    const os = await leer();
+    const proveedorDe = async () => {
+      const codigo = texto(req.headers.get('x-niju-proveedor'), 40).toUpperCase();
+      if (!codigo || !secretoSesion(env)) return null;
+      const hash = await firmar('proveedor:' + codigo, env);
+      return ((await leerKV(env, 'proveedores')) || []).find(p => p.activo && igualSeguro(p.hash, hash)) || null;
+    };
 
-    if (accion === 'ofertar'){
-      const i = os.findIndex(o => o.id === id);
-      if (i < 0) return json({ error:'orden inexistente' }, cors, 404);
-      const proveedor = String(cuerpo.proveedor || '').slice(0, 80).trim();
-      const precio = Math.max(1, parseInt(cuerpo.precio) || 0);
-      if (!proveedor || !precio) return json({ error:'falta proveedor o precio' }, cors, 400);
-      os[i].ofertas = os[i].ofertas || [];
-      os[i].ofertas.push({
-        id: crypto.randomUUID().slice(0, 8), proveedor, precio,
-        cantidad: Math.max(1, parseInt(cuerpo.cantidad) || 1),
-        plazoDias: cuerpo.plazoDias || null,
-        notas: String(cuerpo.notas || '').slice(0, 300), ts: Date.now()
-      });
-      await grabar(os);
-      return json({ ok:true, orden: os[i] }, cors);
+    /* ---- Proveedores (solo el dueño) ---- */
+    if (id === 'proveedores'){
+      if (!dueno) return json({ error:'no autorizado' }, h, 403);
+      if (!secretoSesion(env)) return json({ error:'falta cargar SESION_SECRETO en Cloudflare' }, h, 503);
+      const provs = (await leerKV(env, 'proveedores')) || [];
+      if (req.method === 'GET') return json({ proveedores:provs.map(({ hash, ...p }) => p) }, h);
+      if (req.method === 'POST' && !accion){
+        const nombre = texto(cuerpo.nombre, 80);
+        if (!nombre) return json({ error:'Poné el nombre del proveedor.' }, h, 400);
+        const codigo = 'P-' + crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+        const p = { id:'pv-' + crypto.randomUUID().slice(0, 8), nombre, contacto:texto(cuerpo.contacto, 120),
+                    activo:true, creado:Date.now(), hash:await firmar('proveedor:' + codigo, env) };
+        await grabarKV(env, 'proveedores', [...provs, p]);
+        const { hash, ...publico } = p;
+        return json({ ok:true, proveedor:publico, codigo }, h);
+      }
+      if (req.method === 'POST' && sub === 'baja'){
+        const p = provs.find(x => x.id === accion);
+        if (!p) return json({ error:'proveedor inexistente' }, h, 404);
+        p.activo = false; p.baja = Date.now();
+        await grabarKV(env, 'proveedores', provs);
+        return json({ ok:true }, h);
+      }
+      return json({ error:'método no permitido' }, h, 405);
     }
 
-    const titulo = String(cuerpo.titulo || '').slice(0, 140).trim();
-    if (!titulo) return json({ error:'falta el título de la demanda' }, cors, 400);
-    const o = {
-      ...cuerpo, titulo,
-      id: cuerpo.id || 'od-' + crypto.randomUUID().slice(0, 8),
-      creada: Date.now(), ofertas: [], estado:'abierta'
-    };
-    os.push(o);
-    await grabar(os);
-    return json({ ok:true, orden:o }, cors);
-  }
+    if (id === 'proveedor' && req.method === 'GET'){
+      const p = await proveedorDe();
+      return p ? json({ ok:true, nombre:p.nombre }, h)
+               : json({ error:'Ese código de proveedor no es válido o fue dado de baja.' }, h, 403);
+    }
 
-  return json({ error:'método no permitido' }, cors, 405);
+    /* ---- Mis pedidos ---- */
+    if (id === 'mias' && req.method === 'GET'){
+      const cliente = await clienteDe(req, env);
+      if (!cliente) return json({ error:'Entrá con tu cuenta para ver tus pedidos.' }, h, 401);
+      const os = (await leer()).filter(o => o.clienteEmail === cliente.email).sort((a, b) => b.creada - a.creada);
+      return json({ pedidos:os.map(o => ({ ...pedidoPublico(o), avisos:o.avisos || [],
+        ofertaAceptada:o.ofertaAceptada || null, ordenId:o.ordenId || null })) }, h);
+    }
+
+/* ---- Foto de una oferta ---- */
+    if (id === 'foto' && req.method === 'GET'){
+      const guardada = await env.NIJU.get('foto:' + texto(accion, 20));
+      const m = guardada && guardada.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+      if (!m) return json({ error:'foto inexistente' }, h, 404);
+      const bin = Uint8Array.from(atob(m[2]), c => c.charCodeAt(0));
+      return new Response(bin, { headers:{ ...cors, 'content-type':m[1], 'Cache-Control':'public, max-age=86400' } });
+    }
+
+    /* ---- Mis ofertas como vendedor ---- */
+    if (id === 'mis-ofertas' && req.method === 'GET'){
+      const cliente = await clienteDe(req, env);
+      if (!cliente) return json({ error:'Entrá con tu cuenta para ver tus ofertas.' }, h, 401);
+      const ahora = Date.now();
+      const ofertas = (await leer()).flatMap(o => (o.ofertas || [])
+        .filter(of => of.vendedorEmail === cliente.email)
+        .map(of => ({
+          ...ofertaPublica(of), pedidoId:o.id, titulo:o.titulo, cantidad:Math.min(of.cantidad, o.cantidad), comisionPct:of.comisionPct,
+          estado: o.ofertaAceptada === of.id ? 'aceptada' : o.estado === 'adjudicada' ? 'otra'
+                : o.estado === 'cerrada' ? 'cerrada' : o.vence <= ahora ? 'vencida' : 'abierta',
+          ordenId: o.ofertaAceptada === of.id ? o.ordenId : null
+        }))).sort((a, b) => b.ts - a.ts);
+      return json({ ofertas }, h);
+    }
+
+    /* ---- Listado ---- */
+    if (req.method === 'GET'){
+      const os = await leer();
+      const lista = dueno ? os : os.map(pedidoPublico);
+      return json({ pedidos:id ? lista.filter(o => o.id === id) : lista }, h);
+    }
+
+    if (req.method !== 'POST') return json({ error:'método no permitido' }, h, 405);
+
+    /* ---- Publicar ---- */
+    if (!id){
+      const cliente = await clienteDe(req, env);
+      if (!cliente) return json({ error:'Para publicar un pedido entrá con tu cuenta: así te avisamos cuando llegan ofertas.' }, h, 401);
+      const titulo = texto(cuerpo.titulo, 140);
+      const precioMax = Math.round(+cuerpo.precioMax || 0);
+      if (!titulo) return json({ error:'Decinos qué buscás.' }, h, 400);
+      if (precioMax <= 0) return json({ error:'Poné hasta cuánto pagás por unidad.' }, h, 400);
+      const dias = Math.min(60, Math.max(1, parseInt(cuerpo.dias) || 12));
+      const o = {
+        id:'od-' + crypto.randomUUID().slice(0, 8), titulo, detalle:texto(cuerpo.detalle, 600), rubro:texto(cuerpo.rubro, 30) || null,
+        precioMax, cantidad:Math.min(1000, Math.max(1, parseInt(cuerpo.cantidad) || 1)),
+        autor:texto(cliente.perfil?.nombre, 60) || 'Cliente', clienteEmail:cliente.email,
+        creada:Date.now(), vence:Date.now() + dias * 864e5, estado:'abierta', ofertas:[], avisos:[]
+      };
+      const os = await leer();
+      os.push(o);
+      await grabar(os);
+      return json({ ok:true, pedido:pedidoPublico(o) }, h);
+    }
+
+    const os = await leer();
+    const o = os.find(x => x.id === id);
+    if (!o) return json({ error:'Ese pedido no existe.' }, h, 404);
+
+    /* ---- Ofertar ----
+       Ofertan NiJu (el dueño), los proveedores aprobados (con su código) y cualquier
+       cliente con la cuenta completa: un particular, un emprendedor o un negocio que lo
+       tiene o sabe dónde conseguirlo más barato. Al que no es proveedor se le pide foto
+       real, estado del producto y compromiso de envío, y NiJu le cobra una comisión. */
+    if (accion === 'ofertar'){
+      let prov = dueno ? { id:'niju', nombre:'NiJu', tipo:'niju' } : await proveedorDe();
+      if (prov && !prov.tipo) prov = { id:prov.id, nombre:prov.nombre, tipo:'proveedor' };
+      let vendedor = null;
+      if (!prov){
+        vendedor = await clienteDe(req, env);
+        if (!vendedor) return json({ error:'Para ofertar entrá con tu cuenta (o con tu código de proveedor).' }, h, 401);
+        const faltan = problemasPerfil(vendedor.perfil);
+        if (faltan.length) return json({ error:'Completá tus datos antes de vender: ' + faltan.join(', ') + '.' }, h, 400);
+        const ap = String(vendedor.perfil.apellido || '').trim();
+        prov = { id:'cli-' + (await firmar('vendedor:' + vendedor.email, env)).slice(0, 10),
+                 nombre:`${vendedor.perfil.nombre}${ap ? ' ' + ap[0] + '.' : ''}`, tipo:'particular' };
+      }
+      const precio = Math.round(+cuerpo.precio || 0);
+      if (precio <= 0) return json({ error:'Poné tu precio por unidad.' }, h, 400);
+      const estadoProducto = ESTADOS_PRODUCTO.includes(cuerpo.estadoProducto) ? cuerpo.estadoProducto : null;
+      const foto = String(cuerpo.foto || '');
+      if (vendedor){
+        if (!estadoProducto) return json({ error:'Decinos si es nuevo, usado o reacondicionado.' }, h, 400);
+        if (foto.length > 600000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(foto))
+          return json({ error:'Subí una foto real del producto (JPG, PNG o WebP, hasta 450 KB).' }, h, 400);
+        if (!cuerpo.compromisoEnvio) return json({ error:'Tenés que comprometerte a enviarlo a cada comprador.' }, h, 400);
+      }
+      const ids = [...new Set([id, ...(Array.isArray(cuerpo.ids) ? cuerpo.ids.slice(0, 50).map(x => texto(x, 20)) : [])])];
+      const oferta = { id:crypto.randomUUID().slice(0, 8), proveedorId:prov.id, proveedor:prov.nombre, tipo:prov.tipo, precio,
+        cantidad:Math.max(1, parseInt(cuerpo.cantidad) || 1), plazoDias:Math.max(0, parseInt(cuerpo.plazoDias) || 0) || null,
+        notas:texto(cuerpo.notas, 300), estadoProducto, condicion:texto(cuerpo.condicion, 300), foto:!!vendedor, ts:Date.now(),
+        comisionPct:vendedor ? COMISION_PARTICULAR : null, vendedorEmail:vendedor ? vendedor.email : null };
+      let ofertados = 0;
+      for (const x of os){
+        if (!ids.includes(x.id) || !abierta(x)) continue;
+        if (vendedor && x.clienteEmail === vendedor.email) continue;        // nadie se oferta a sí mismo
+        x.ofertas = [...(x.ofertas || []), oferta];
+        x.avisos = [...(x.avisos || []), { id:'a-' + crypto.randomUUID().slice(0, 8), ts:Date.now(), leido:false,
+          titulo:`Nueva oferta por "${x.titulo}"`,
+          texto:`${prov.nombre} lo consigue a $ ${precio.toLocaleString('es-AR')} por unidad${oferta.plazoDias ? `, en ${oferta.plazoDias} días` : ''}.` }];
+        ofertados++;
+      }
+      if (!ofertados) return json({ error:'Ese pedido ya no recibe ofertas (o es tuyo).' }, h, 400);
+      if (vendedor) await env.NIJU.put('foto:' + oferta.id, foto, { expirationTtl:90 * 86400 });
+      await grabar(os);
+      return json({ ok:true, ofertados }, h);
+    }
+
+    /* ---- Acciones del cliente ---- */
+    const cliente = await clienteDe(req, env);
+    const esSuyo = !!cliente && o.clienteEmail === cliente.email;
+
+    if (accion === 'leido'){
+      if (!esSuyo) return json({ error:'no autorizado' }, h, 403);
+      o.avisos = (o.avisos || []).map(a => ({ ...a, leido:true }));
+      await grabar(os);
+      return json({ ok:true }, h);
+    }
+
+    if (accion === 'cerrar'){
+      if (!esSuyo && !dueno) return json({ error:'no autorizado' }, h, 403);
+      if (abierta(o)){ o.estado = 'cerrada'; o.cerrada = Date.now(); await grabar(os); }
+      return json({ ok:true, pedido:pedidoPublico(o) }, h);
+    }
+
+    if (accion === 'aceptar'){
+      if (!esSuyo) return json({ error:'Solo quien publicó el pedido puede aceptar una oferta.' }, h, 403);
+      if (!abierta(o)) return json({ error:'Este pedido ya no está abierto.' }, h, 400);
+      const of = (o.ofertas || []).find(x => x.id === texto(cuerpo.ofertaId, 20));
+      if (!of) return json({ error:'Esa oferta no existe.' }, h, 404);
+      const faltan = problemasPerfil(cliente.perfil);
+      if (faltan.length) return json({ error:'Completá tus datos antes de comprar: ' + faltan.join(', ') + '.' }, h, 400);
+      const cant = Math.min(o.cantidad, of.cantidad);
+      const orden = await nuevaOrden(env, ctx, cliente, {
+        modalidad:'directo', entrega:'envio', costoEntrega:0, envioTiendas:0, pago:'transfer', comprobante:null, tolerancia:0.05,
+        totalARS:of.precio * cant,
+        origen:{ tipo:'demanda', pedidoId:o.id, ofertaId:of.id,
+                 vendedor:of.tipo === 'particular' ? { email:of.vendedorEmail, comisionPct:of.comisionPct } : null },
+        tramos:[{ id:'t-' + crypto.randomUUID().slice(0, 8), tiendaId:'proveedor-' + of.proveedorId, tienda:of.proveedor,
+          tipo:'nacional', propio:of.proveedorId === 'niju', estado:'pendiente', envios:[],
+          lineas:[{ id:'l-' + crypto.randomUUID().slice(0, 8), ofertaId:of.id, titulo:o.titulo, cant, precioAcordado:of.precio,
+            moneda:'ARS', url:null, imagen:o.imagen || null, variante:null, estado:'pendiente', precioReal:null, loteId:null, nota:of.notas || '' }] }]
+      }, `Aceptaste la oferta de ${of.proveedor} en "Pedí y que compitan". Falta acreditar el pago.`);
+      o.estado = 'adjudicada'; o.ofertaAceptada = of.id; o.ordenId = orden.id; o.adjudicada = Date.now();
+      await grabar(os);
+      return json({ ok:true, orden, pedido:pedidoPublico(o) }, h);
+    }
+
+    return json({ error:'acción desconocida' }, h, 400);
+  }catch(e){
+    return json({ error:String(e.message || e) }, h, 500);
+  }
 }
 
 /* ============================================================
@@ -811,6 +1028,191 @@ function reconocerTienda(host){
   }
   const limpio = host.replace(/^www\./, '');
   return { id:'externa', nombre:limpio, moneda:null, tipo:/\.ar$/.test(limpio) ? 'nacional' : 'internacional' };
+}
+
+/* ============================================================
+   Asesor de importación — Claude, por HTTP directo
+   El worker se pega a mano en el panel de Cloudflare (sin npm),
+   así que no puede usar el SDK: se llama a la API con fetch.
+   ============================================================ */
+const ARANCEL_ZIP = 'https://serviciosweb.afip.gob.ar/aduana/arancelintegrado/archivos/arancel.zip';
+const MODELO_ASESOR = 'claude-opus-5';
+const CONSULTAS_POR_DIA = 40;           // por IP: el asistente cuesta plata por consulta
+
+async function arancelZip(cors){
+  const r = await fetch(ARANCEL_ZIP, { cf:{ cacheTtl:21600, cacheEverything:true } });
+  return new Response(r.body, { status:r.status,
+    headers:{ ...cors, 'content-type':'application/zip', 'Cache-Control':'public, max-age=21600' } });
+}
+
+/* Lo que el asistente puede citar. Es el mismo contenido que
+   js/data/normas-importacion.js: si cambia una norma, cambiar los dos. */
+const NORMAS_ASESOR = `Normas vigentes consultadas el 14-09-2026:
+- Pequeño envío por courier o Correo Argentino (RG 5608; Decreto 604/2026 y RG 5884/2026): hasta 5 envíos por persona por año, hasta 3 unidades de la misma especie, hasta 50 kg por paquete, hasta US$ 3.000 por envío, sin fin comercial. Hasta US$ 400 FOB exento de derecho de importación y tasa de estadística; paga IVA e impuestos internos. Sobre el excedente paga derecho y tasa. Con el cupo anual agotado paga los tributos del régimen general sobre todo el valor. Si no cumple algún límite, va exclusivamente por importación general con despachante.
+- Derecho de importación: depende de la posición NCM; sale del Arancel Integrado de ARCA.
+- Tasa de estadística: 3% con tope (US$ 180 hasta US$ 10.000 de valor en aduana), prorrogada hasta el 31/12/2027 (Decreto 1140/2024; dato de fuente del sector, confirmar en Boletín Oficial).
+- IVA: 21% general, 10,5% reducida (Ley de IVA art. 28), sobre valor en aduana + derecho + tasa.
+- Percepción de IVA (RG 2937 art. 7): 20% (10% si el bien va al 10,5%); no aplica a uso o consumo particular de personas humanas ni a bienes de uso.
+- Percepción de Ganancias (RG 2281 art. 5): 6% general, 11% si es para uso o consumo particular del importador.
+- Percepción de Ingresos Brutos: depende de la provincia; la app no la tiene confirmada.
+- Importación general: requiere CUIT, inscripción en el Registro de Importadores y despachante matriculado.
+- Honorario de despachante: no hay tarifa oficial; el CDA sugirió en 2016 un mínimo de US$ 200 por operación.`;
+
+const SISTEMA_PREGUNTAS = `Sos el asistente de NiJu, una app argentina que compara precios de tiendas del país y del exterior y hace la compra por el cliente ("compra asistida" y "Traelo por mí", que trae productos de cualquier tienda del mundo). Hablás en castellano rioplatense, de vos, claro y breve: hasta 120 palabras, salvo que te pidan detalle.
+
+Ayudás con: precios, envíos y sus etapas, impuestos y trámites de importación, la condición del cliente ante ARCA y cómo usar la app.
+
+Cómo responder:
+- Si te saludan o escriben algo que no es una pregunta, saludá y ofrecé ayuda con dos o tres ejemplos concretos de lo que te pueden preguntar.
+- Para los números del caso del cliente usá solo el bloque CONTEXTO. Si un dato no está, decí cuál falta y cómo conseguirlo, sin estimarlo.
+- Para normas, usá solo la lista de NORMAS. Si la respuesta depende de una norma que no está ahí, decí que conviene confirmarlo con un despachante o un contador, sin dar una cifra.
+- Si piden cómo subvaluar, dividir envíos para esquivar límites o declarar como uso personal algo que es para vender, explicá que no se puede y qué riesgo tiene.
+- Si la consulta es sobre un pedido, un pago o un reclamo concreto, pedí que la escriban al equipo desde Mensajes.
+- Si la pregunta no tiene que ver con compras, envíos o impuestos, decilo en una frase.
+- Nunca digas que vas a averiguar y responder después: respondé ahora con lo que sabés o decí qué falta.
+
+NORMAS
+${NORMAS_ASESOR}`;
+
+const SISTEMA_CLASIFICAR = `Sos clasificador arancelario para importaciones a Argentina. Recibís el título y, a veces, la descripción de un producto tal como aparece en una tienda (puede estar en inglés o chino traducido). Devolvé la posición de la Nomenclatura Común del Mercosur (NCM) más probable, a 8 dígitos con el formato 0000.00.00.
+
+- Clasificá por lo que el producto es y su función principal, según las Reglas Generales de Interpretación del Sistema Armonizado.
+- Si el título no alcanza para decidir entre posiciones (material, uso, potencia, si es parte o accesorio), bajá la confianza, poné las otras posiciones en alternativas explicando cuándo corresponde cada una, y listá el dato que falta.
+- No incluyas alícuotas: la app las toma del Arancel Integrado de ARCA.
+- En descripcion y motivo escribí en castellano simple, para alguien que no sabe de aduana.`;
+
+const ESQUEMA_CLASIFICAR = {
+  type:'object', additionalProperties:false,
+  required:['ncm', 'descripcion', 'confianza', 'motivo', 'alternativas', 'datosQueFaltan', 'ivaReducidoPosible'],
+  properties:{
+    ncm:{ type:'string' },
+    descripcion:{ type:'string' },
+    confianza:{ type:'string', enum:['alta', 'media', 'baja'] },
+    motivo:{ type:'string' },
+    alternativas:{ type:'array', items:{ type:'object', additionalProperties:false, required:['ncm', 'cuando'],
+      properties:{ ncm:{ type:'string' }, cuando:{ type:'string' } } } },
+    datosQueFaltan:{ type:'array', items:{ type:'string' } },
+    ivaReducidoPosible:{ type:'boolean' }
+  }
+};
+
+async function asesor(req, env, cors){
+  const sinCache = { ...cors, 'Cache-Control':'no-store' };
+  if (req.method !== 'POST') return json({ ok:false, error:'Usá POST.' }, sinCache, 405);
+  if (!env.ANTHROPIC_API_KEY) return json({ ok:false, sinClave:true, error:'El asistente todavía no está encendido en el servidor.' }, sinCache);
+
+  let b;
+  try{ b = await req.json(); }catch{ return json({ ok:false, error:'Pedido inválido.' }, sinCache, 400); }
+  const corto = (s, n) => String(s ?? '').slice(0, n);
+
+  if (env.NIJU){
+    const clave = `asesor:${new Date().toISOString().slice(0, 10)}:${req.headers.get('cf-connecting-ip') || 'sin-ip'}`;
+    const usadas = +(await env.NIJU.get(clave) || 0);
+    if (usadas >= CONSULTAS_POR_DIA)
+      return json({ ok:false, error:'Llegaste al límite de consultas al asistente por hoy. Mañana se renueva; si es urgente, escribinos por Mensajes.' }, sinCache, 429);
+    await env.NIJU.put(clave, String(usadas + 1), { expirationTtl:90000 });
+  }
+
+  try{
+    if (b.accion === 'clasificar'){
+      const producto = [`Título: ${corto(b.titulo, 400)}`, b.marca && `Marca: ${corto(b.marca, 80)}`,
+        b.tienda && `Tienda: ${corto(b.tienda, 80)}`, b.descripcion && `Descripción: ${corto(b.descripcion, 3000)}`].filter(Boolean).join('\n');
+      const texto = await llamarClaude(env, {
+        system:SISTEMA_CLASIFICAR,
+        output_config:{ effort:'medium', format:{ type:'json_schema', schema:ESQUEMA_CLASIFICAR } },
+        messages:[{ role:'user', content:producto }]
+      });
+      return json({ ok:true, clasificacion:JSON.parse(texto) }, sinCache);
+    }
+
+    if (b.accion === 'preguntar'){
+      const pregunta = corto(b.pregunta, 1500).trim();
+      if (!pregunta) return json({ ok:false, error:'Escribí tu pregunta.' }, sinCache, 400);
+
+      /* Historial corto, alternado y empezando por el cliente. */
+      const historial = (Array.isArray(b.historial) ? b.historial : []).slice(-8)
+        .map(m => ({ role:m.rol === 'niju' ? 'assistant' : 'user', content:corto(m.texto, 1500) }))
+        .filter(m => m.content.trim());
+      while (historial.length && historial[0].role !== 'user') historial.shift();
+
+      const contexto = b.contexto ? corto(JSON.stringify(b.contexto), 12000) : 'Sin datos de una compra: es una consulta general.';
+      const texto = await llamarClaude(env, {
+        system:`${SISTEMA_PREGUNTAS}\n\nCONTEXTO\n${contexto}`,
+        output_config:{ effort:'low' },
+        messages:[...historial, { role:'user', content:pregunta }]
+      });
+      return json({ ok:true, respuesta:texto.trim() }, sinCache);
+    }
+
+    return json({ ok:false, error:'Acción desconocida.' }, sinCache, 400);
+  }catch(e){
+    return json({ ok:false, error:'El asistente no pudo responder en este momento. Probá de nuevo en un rato.', detalle:String(e.message || e) }, sinCache, 502);
+  }
+}
+
+async function llamarClaude(env, cuerpo){
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{
+      'content-type':'application/json',
+      'x-api-key':env.ANTHROPIC_API_KEY,
+      'anthropic-version':'2023-06-01',
+      'anthropic-beta':'server-side-fallback-2026-07-01'
+    },
+    body:JSON.stringify({ model:MODELO_ASESOR, max_tokens:16000, fallbacks:'default', ...cuerpo })
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d?.error?.message || `API ${r.status}`);
+  if (d.stop_reason === 'refusal') throw new Error('consulta rechazada por el modelo');
+  const texto = (d.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+  if (!texto) throw new Error('respuesta vacía');
+  return texto;
+}
+
+/* ============================================================
+   SOLICITUDES — "Vendé al mundo" y "Apps y webs a medida"
+   Las manda cualquiera (con límite por IP); las lee solo el dueño.
+   ============================================================ */
+async function solicitudes(req, url, env, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
+  const [, , id, accion] = url.pathname.split('/').filter(Boolean);
+  const dueno = esDueno(req, env);
+
+  if (req.method === 'GET'){
+    if (!dueno) return json({ error:'no autorizado' }, h, 403);
+    const claves = await clavesKV(env, 'solicitud:');
+    const lista = (await Promise.all(claves.map(k => leerKV(env, k)))).filter(Boolean).sort((a, b) => b.creada - a.creada);
+    return json({ solicitudes:lista }, h);
+  }
+  if (req.method !== 'POST') return json({ error:'método no permitido' }, h, 405);
+
+  if (id){
+    if (accion !== 'atendida' || !dueno) return json({ error:'no autorizado' }, h, 403);
+    const s = await leerKV(env, 'solicitud:' + id);
+    if (!s) return json({ error:'solicitud inexistente' }, h, 404);
+    s.atendida = Date.now();
+    await grabarKV(env, 'solicitud:' + id, s);
+    return json({ ok:true }, h);
+  }
+
+  const limite = `limite-sol:${new Date().toISOString().slice(0, 10)}:${req.headers.get('cf-connecting-ip') || 'sin-ip'}`;
+  const usadas = +(await env.NIJU.get(limite) || 0);
+  if (usadas >= 10) return json({ error:'Llegaste al límite de solicitudes de hoy. Probá mañana.' }, h, 429);
+  await env.NIJU.put(limite, String(usadas + 1), { expirationTtl:90000 });
+
+  const cuerpo = await req.json().catch(() => ({}));
+  if (!['exportar', 'desarrollo'].includes(cuerpo.tipo)) return json({ error:'tipo de solicitud desconocido' }, h, 400);
+  const crudo = JSON.stringify(cuerpo.datos || {});
+  if (crudo.length > 12000) return json({ error:'La solicitud es demasiado larga.' }, h, 400);
+  const datos = JSON.parse(crudo);
+  if (!String(datos.nombre || '').trim() || !String(datos.contacto || '').trim())
+    return json({ error:'Poné tu nombre y un teléfono o email.' }, h, 400);
+  const cliente = await clienteDe(req, env);
+  const s = { id:'SOL-' + Date.now().toString(36).toUpperCase(), tipo:cuerpo.tipo, datos, creada:Date.now(),
+              cliente:cliente ? cliente.email : null, atendida:null };
+  await grabarKV(env, 'solicitud:' + s.id, s);
+  return json({ ok:true, id:s.id }, h);
 }
 
 async function resolver(url, env, ctx, cors){

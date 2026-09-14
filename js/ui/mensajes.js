@@ -1,86 +1,119 @@
 /* ============================================================
-   NiJu — Bandeja única
-   El cliente habla con la tienda local, con el vendedor del
-   exterior y con nosotros desde el mismo lugar. Cada hilo sabe
-   qué canal usa por detrás (WhatsApp, mail, chat de la tienda).
+   NiJu — Mensajes
+   El asistente de NiJu responde de verdad (engine/asesor.js): usa
+   tu condición ante ARCA, tu provincia y tu carrito, y si algo no
+   lo sabe lo dice. Antes contestaba frases al azar ("lo reviso y
+   te confirmo") a cualquier cosa, incluso a un "hola".
+   Los chats con tiendas no están conectados todavía: se dice así,
+   en vez de simular que la tienda responde.
    ============================================================ */
-import { el, ic, toast, fecha, uid } from '../util.js';
+import { el, uid } from '../util.js';
 import { store } from '../state.js';
-import { logoTienda } from './components.js';
+import { logoTienda, botonVolver, destino } from './components.js';
+import { preguntarAsesor } from '../engine/asesor.js';
+import { PERFILES } from '../engine/fiscal.js';
+import { STORE_BY_ID } from '../data/stores.js';
 
-const SEMILLA = [
-  { id:'h1', quien:'Soporte NiJu', tiendaId:'niju', canal:'chat', asunto:'¿Cómo funciona el precio final?',
-    msgs:[{ de:'them', t:'¡Hola! Soy del equipo de NiJu. El precio que ves ya incluye producto, envío, impuestos de importación y nuestra gestión. No hay sorpresas al final.', ts:Date.now() - 7200000 }] },
-  { id:'h2', quien:'Vendedor — AliExpress', tiendaId:'aliexpress', canal:'tienda', asunto:'Consulta por stock',
-    msgs:[{ de:'them', t:'Hello! Yes, we have stock. Shipping to Argentina takes 15-25 days.', ts:Date.now() - 86400000 }] },
-  { id:'h3', quien:'Frávega', tiendaId:'fravega', canal:'email', asunto:'Retiro en sucursal',
-    msgs:[{ de:'them', t:'Tu pedido puede retirarse en la sucursal que elijas dentro de las 48 h hábiles.', ts:Date.now() - 172800000 }] }
-];
+const ASISTENTE = {
+  id:'asistente', quien:'Asistente NiJu', tiendaId:'niju', canal:'chat', asunto:'Preguntá lo que quieras',
+  msgs:[{ de:'them', t:'¡Hola! Soy el asistente de NiJu. Preguntame por precios, envíos, impuestos de importación, trámites de Aduana o cómo usar la app.', ts:Date.now() }]
+};
 
-export function vistaMensajes(){
-  if (!store.get('hilos').length) store.set('hilos', SEMILLA);
-  let activo = store.get('hilos')[0]?.id;
+/* Conversaciones de ejemplo que tenían versiones anteriores: eran inventadas. */
+const DE_EJEMPLO = new Set(['h1', 'h2', 'h3']);
+
+const SUGERENCIAS = ['¿Cuánto puedo traer por courier?', '¿Por qué pago IVA si entra en la franquicia?', '¿Qué es la NCM?', '¿Qué me conviene si es para vender?'];
+
+function hilos(){
+  let h = (store.get('hilos') || []).filter(x => !DE_EJEMPLO.has(x.id));
+  if (!h.some(x => x.id === ASISTENTE.id)) h = [structuredClone(ASISTENTE), ...h];
+  return h;
+}
+
+function contextoGeneral(){
+  const u = store.get('usuario');
+  const carrito = store.get('carrito') || [];
+  return {
+    condicionAnteARCA: (PERFILES[u?.perfilFiscal] || PERFILES.consumidor_final).label,
+    entroConSuCuenta: !!u,
+    provincia: destino(),
+    carrito: carrito.map(i => ({ producto:i.titulo, tienda:STORE_BY_ID[i.tiendaId]?.nombre || i.tiendaId,
+      origen:STORE_BY_ID[i.tiendaId]?.tipo || 'desconocido', precio:i.precio, moneda:i.moneda, cantidad:i.cant }))
+  };
+}
+
+export function vistaMensajes(ir){
+  store.set('hilos', hilos());
+  let activo = ASISTENTE.id;
+  let pensando = false;
 
   const raiz = el('div', { class:'wrap' });
   const lista = el('div', { class:'col' });
   const panel = el('div');
 
   function pintar(){
-    const hilos = store.get('hilos');
-    lista.replaceChildren(...hilos.map(h => el('div', { class:'thread' + (h.id === activo ? ' on' : ''), onclick:() => { activo = h.id; pintar(); } },
+    const todos = store.get('hilos');
+    lista.replaceChildren(...todos.map(h => el('button', { class:'thread' + (h.id === activo ? ' on' : ''), onclick:() => { activo = h.id; pintar(); } },
       logoTienda(h.tiendaId, true),
-      el('div', { class:'spacer' },
+      el('div', { class:'spacer', style:{ textAlign:'left' } },
         el('b', { class:'tiny' }, h.quien),
-        el('div', { class:'tiny dim' }, h.asunto),
-        el('div', { class:'tiny', style:{ color:'var(--tx-3)' } }, canalNom(h.canal))),
-      el('span', { class:'tiny dim' }, fecha(h.msgs.at(-1)?.ts)))));
+        el('div', { class:'tiny dim' }, h.asunto)))));
 
-    const h = hilos.find(x => x.id === activo);
-    if (!h){ panel.replaceChildren(); return; }
+    const h = todos.find(x => x.id === activo);
+    if (!h){ panel.replaceChildren(''); return; }
+    const esAsistente = h.id === ASISTENTE.id;
 
-    const cuerpo = el('div', { class:'chat-body' },
-      ...h.msgs.map(m => el('div', { class:'msg ' + (m.de === 'me' ? 'me' : 'them') },
-        el('span', { class:'who' }, m.de === 'me' ? 'Vos' : h.quien), m.t)));
+    const cuerpo = el('div', { class:'chat-body', 'aria-live':'polite' },
+      ...h.msgs.map(m => el('div', { class:'msg ' + (m.de === 'me' ? 'me' : 'them') + (m.de === 'aviso' ? ' aviso' : '') },
+        el('span', { class:'who' }, m.de === 'me' ? 'Vos' : m.de === 'aviso' ? 'Aviso' : h.quien), m.t)),
+      pensando && esAsistente ? el('div', { class:'msg them' }, el('span', { class:'who' }, h.quien), 'Pensando la respuesta…') : null);
 
-    const input = el('input', { class:'inp', placeholder:'Escribí tu mensaje…' });
-    const enviar = () => {
-      const t = input.value.trim(); if (!t) return;
+    const input = el('input', { class:'inp', placeholder: esAsistente ? 'Escribí tu pregunta…' : 'Escribí tu mensaje…', 'aria-label':'Mensaje' });
+
+    const enviar = async texto => {
+      const t = (texto ?? input.value).trim();
+      if (!t || pensando) return;
       h.msgs.push({ de:'me', t, ts:Date.now() });
-      store.set('hilos', hilos);
       input.value = '';
-      pintar();
-      setTimeout(() => {
-        h.msgs.push({ de:'them', t:respuesta(h), ts:Date.now() });
-        store.set('hilos', hilos); pintar();
-      }, 900);
+      if (!esAsistente){
+        h.msgs.push({ de:'aviso', t:`Este chat todavía no está conectado con ${h.quien}: tu mensaje no le llega. Escribile desde su página.`, ts:Date.now() });
+        store.set('hilos', todos); pintar();
+        return;
+      }
+      pensando = true; store.set('hilos', todos); pintar();
+      const historial = h.msgs.slice(0, -1).filter(m => m.de !== 'aviso').slice(-8)
+        .map(m => ({ rol:m.de === 'me' ? 'cliente' : 'niju', texto:m.t }));
+      const r = await preguntarAsesor({ pregunta:t, contexto:contextoGeneral(), historial });
+      pensando = false;
+      h.msgs.push({ de:'them', t:r.texto, ts:Date.now(), origen:r.origen });
+      store.set('hilos', todos); pintar();
     };
     input.addEventListener('keydown', e => { if (e.key === 'Enter') enviar(); });
 
     panel.replaceChildren(el('div', { class:'chat' },
       el('div', { class:'cart-group-head' },
         logoTienda(h.tiendaId, true),
-        el('div', { class:'spacer' }, el('b', {}, h.quien), el('div', { class:'tiny dim' }, h.asunto)),
-        el('span', { class:'chip tiny' }, canalNom(h.canal))),
+        el('div', { class:'spacer' }, el('b', {}, h.quien), el('div', { class:'tiny dim' }, h.asunto))),
       cuerpo,
-      el('div', { class:'chat-foot' }, input, el('button', { class:'btn btn-win', onclick:enviar }, 'Enviar'))));
+      esAsistente && h.msgs.length < 3 ? el('div', { class:'k2-chips', style:{ padding:'8px 12px' } },
+        ...SUGERENCIAS.map(s => el('button', { class:'v-chip', onclick:() => enviar(s) }, s))) : null,
+      el('div', { class:'chat-foot' }, input,
+        el('button', { class:'btn btn-win', disabled:pensando ? true : null, onclick:() => enviar() }, 'Enviar'))));
     cuerpo.scrollTop = cuerpo.scrollHeight;
   }
 
-  raiz.append(el('section', { class:'section' },
-    el('div', { class:'kicker' }, 'Un solo lugar para hablar'),
-    el('h1', { style:{ marginBottom:'16px' } }, 'Mensajes'),
-    el('div', { class:'res-layout' }, lista, panel)));
+  raiz.append(
+    botonVolver(ir),
+    el('section', { class:'section' },
+      el('div', { class:'kicker' }, 'Un solo lugar para hablar'),
+      el('h1', { style:{ marginBottom:'16px' } }, 'Mensajes'),
+      el('div', { class:'res-layout' }, lista, panel)));
   pintar();
   return raiz;
 }
 
-const canalNom = c => ({ chat:'💬 Chat NiJu', tienda:'🏪 Chat de la tienda', email:'✉️ Email', whatsapp:'📱 WhatsApp' }[c] || c);
-
-function respuesta(h){
-  const r = {
-    niju:['Lo reviso y te confirmo en un rato.', 'Ya lo estamos viendo. Cualquier cosa te avisamos por acá.'],
-    default:['Gracias por tu consulta, respondemos a la brevedad.', 'Recibido. Te contestamos dentro de las 24 h.']
-  };
-  const arr = r[h.tiendaId] || r.default;
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+export const nuevoHilo = (quien, tiendaId, asunto) => {
+  const h = { id:'h-' + uid(), quien, tiendaId, canal:'tienda', asunto, msgs:[] };
+  store.set('hilos', [...hilos(), h]);
+  return h.id;
+};

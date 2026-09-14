@@ -1,93 +1,164 @@
 /* ============================================================
-   NiJu — Bolsa de demanda
+   NiJu — "Pedí y que compitan" (bolsa de demanda)
    ------------------------------------------------------------
-   Da vuelta el comercio: en vez de que la oferta espere al
-   cliente, es la demanda la que sale a buscar, con plata puesta.
+   Al revés de siempre: el cliente dice qué quiere y hasta cuánto
+   paga, y compiten por servirlo.
 
-   El cliente publica: "quiero esto, pago hasta tanto, espero
-   hasta tal día". La app junta a todos los que pidieron lo mismo
-   y publica UNA orden agregada. Compiten por llenarla las tiendas
-   con stock parado, los importadores, los mayoristas y NiJu.
-
-   Lo que no se llena es la mejor información del negocio: es
-   demanda real, con nombre y apellido, que nadie está sirviendo.
+   Cómo funciona desde la v0.4.1 (14-09-2026):
+     · Publica solo un cliente con cuenta: el pedido queda atado a
+       su usuario y lo sigue en Mi cuenta → Mis pedidos.
+     · Los pedidos iguales se juntan: 40 personas pidiendo lo mismo
+       mueven a un proveedor que 1 sola no mueve.
+     · Ofertan proveedores aprobados por el dueño (con su código), NiJu
+       y cualquier cliente con la cuenta completa que lo tenga o lo
+       consiga más barato: con foto real, estado del producto y
+       compromiso de envío. NiJu le cobra COMISION_PARTICULAR.
+     · Cada oferta nueva le llega al cliente como aviso (campanita).
+     · El cliente acepta una oferta y se convierte en un pedido de
+       compra "pendiente de pago", como cualquier compra de NiJu.
+     · No hay seña: antes se mostraba una seña del 15% que nunca se
+       cobraba. Vuelve cuando exista el cobro dentro de la app.
+   Todo vive en el servidor (KV 'demanda' y 'proveedores').
    ============================================================ */
-import { store } from '../state.js';
-import { uid } from '../util.js';
 import { CONFIG } from '../config.js';
-import { cabecerasAdmin } from './sesion.js';
-import { similitud, limpiar, tokens } from './normalize.js';
+import { tokenCliente, hayCuenta } from './nube.js';
+import { cabecerasAdmin, esDueno } from './sesion.js';
+import { limpiar, tokens } from './normalize.js';
 
-export const SENA_DEMANDA = 0.15;      // lo que deja el que pide
 export const DIAS_DEFECTO = 12;
+export const SENA_DEMANDA = 0;          // sin seña hasta que haya cobro real
 
-export const estadoSyncDemanda = { remoto:false, error:null };
+/* Comisión que NiJu le cobra a quien vende sin ser proveedor aprobado
+   (un particular, un emprendedor, un negocio). Mismo valor en el worker. */
+export const COMISION_PARTICULAR = 0.04;
+export const TIPOS_OFERTA = { proveedor:'Proveedor aprobado', niju:'NiJu', particular:'Vendedor con cuenta' };
+export const ESTADOS_PRODUCTO = { nuevo:'Nuevo', usado:'Usado', reacondicionado:'Reacondicionado' };
+export const fotoUrl = id => `${CONFIG.api}/demanda/foto/${id}`;
 
-async function api(ruta, opciones){
-  const r = await fetch(CONFIG.api + ruta, {
-    ...opciones, headers:{ 'content-type':'application/json', accept:'application/json', ...cabecerasAdmin() }
-  });
+const CLAVE_PROVEEDOR = 'niju.proveedor';
+const leerLocal = k => { try{ return localStorage.getItem(k); }catch{ return null; } };
+export const codigoProveedor = () => leerLocal(CLAVE_PROVEEDOR);
+export const nombreProveedor = () => leerLocal(CLAVE_PROVEEDOR + '.nombre');
+
+async function api(ruta, { metodo = 'GET', cuerpo, comoDueno = false } = {}){
+  const headers = { accept:'application/json' };
+  if (cuerpo !== undefined) headers['content-type'] = 'application/json';
+  if (comoDueno) Object.assign(headers, cabecerasAdmin());
+  if (tokenCliente()) headers.authorization = 'Bearer ' + tokenCliente();
+  if (codigoProveedor()) headers['x-niju-proveedor'] = codigoProveedor();
+  let r;
+  try{
+    r = await fetch(CONFIG.api + '/demanda' + ruta, { method:metodo, headers, cache:'no-store',
+      body: cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined });
+  }catch{
+    throw new Error('No pudimos hablar con el servidor de NiJu. Revisá la conexión y probá de nuevo.');
+  }
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(d.error || `El servidor respondió ${r.status}`), { status:r.status });
   return d;
 }
 
-export const ordenes = () => store.get('ordenesDemanda') || [];
+/* ---------------- Estados ---------------- */
+export const estadoDe = p => p.estado === 'abierta' && p.vence <= Date.now() ? 'vencida' : p.estado;
+export const ESTADOS_PEDIDO = {
+  abierta:    { texto:'Abierto, recibiendo ofertas', clase:'tag-nac' },
+  adjudicada: { texto:'Aceptaste una oferta', clase:'tag-win' },
+  cerrada:    { texto:'Cerrado por vos', clase:'' },
+  vencida:    { texto:'Venció sin aceptar oferta', clase:'tag-warn' }
+};
+export const diasQueFaltan = p => Math.max(0, Math.ceil((p.vence - Date.now()) / 864e5));
 
+/* ---------------- Pedidos ---------------- */
+let cache = [];
+export const estadoSyncDemanda = { remoto:false, error:null };
+
+export async function listarPedidos(){
+  const d = await api('', { comoDueno:esDueno() });
+  cache = d.pedidos || [];
+  estadoSyncDemanda.remoto = true; estadoSyncDemanda.error = null;
+  return cache;
+}
+
+/* Compatibilidad con el Radar del Panel, que lee la bolsa. */
+export const ordenes = () => cache;
 export async function sincronizarDemanda(){
-  try{
-    const d = await api('/demanda');
-    store.set('ordenesDemanda', d.ordenes || []);
-    estadoSyncDemanda.remoto = true; estadoSyncDemanda.error = null;
-  }catch(e){
-    estadoSyncDemanda.remoto = false; estadoSyncDemanda.error = String(e.message || e);
-  }
-  return ordenes();
+  try{ await listarPedidos(); }
+  catch(e){ estadoSyncDemanda.remoto = false; estadoSyncDemanda.error = e.message; }
+  return cache;
 }
 
-/** Publicar una demanda. Esto no es una consulta: es un compromiso. */
-export async function publicar({ titulo, detalle, precioMax, cantidad = 1, dias = DIAS_DEFECTO, autor, email, rubro, imagen }){
-  const o = {
-    id:'od-' + uid(), titulo:titulo.trim(), detalle:detalle || '', rubro:rubro || null, imagen:imagen || null,
-    precioMax:Math.round(precioMax), cantidad:Math.max(1, cantidad),
-    autor:autor || 'Anónimo', email:email || null,
-    sena: Math.round(precioMax * cantidad * SENA_DEMANDA),
-    creada:Date.now(), vence:Date.now() + dias * 864e5,
-    ofertas:[], estado:'abierta'
-  };
-  try{
-    const d = await api('/demanda', { method:'POST', body:JSON.stringify(o) });
-    estadoSyncDemanda.remoto = true;
-    await sincronizarDemanda();
-    return d.orden || o;
-  }catch(e){
-    estadoSyncDemanda.remoto = false; estadoSyncDemanda.error = String(e.message || e);
-    store.push('ordenesDemanda', o);
-    return o;
-  }
+export async function misPedidos(){
+  if (!hayCuenta()) return [];
+  return (await api('/mias')).pedidos || [];
 }
 
-/** Un proveedor se ofrece a llenar la orden. */
-export async function ofertar(ordenId, { proveedor, precio, cantidad, plazoDias, notas }){
-  const of = { id:uid(), proveedor, precio:Math.round(precio), cantidad:Math.max(1, cantidad),
-               plazoDias:plazoDias || null, notas:notas || '', ts:Date.now() };
-  try{
-    await api(`/demanda/${ordenId}/ofertar`, { method:'POST', body:JSON.stringify(of) });
-    await sincronizarDemanda();
-  }catch(e){
-    estadoSyncDemanda.remoto = false; estadoSyncDemanda.error = String(e.message || e);
-    store.set('ordenesDemanda', ordenes().map(o =>
-      o.id !== ordenId ? o : { ...o, ofertas:[...(o.ofertas || []), of] }));
-  }
-  return ordenes().find(o => o.id === ordenId);
+export async function publicar({ titulo, detalle, precioMax, cantidad = 1, dias = DIAS_DEFECTO, rubro }){
+  return (await api('', { metodo:'POST', cuerpo:{ titulo, detalle, precioMax, cantidad, dias, rubro } })).pedido;
 }
+
+/** Oferta para todo el bloque: le llega a cada persona que pidió lo mismo. */
+export function ofertar(bloque, { precio, cantidad, plazoDias, notas, estadoProducto, condicion, foto, compromisoEnvio }){
+  const ids = bloque.pedidos.map(p => p.id);
+  return api(`/${ids[0]}/ofertar`, { metodo:'POST', comoDueno:esDueno(),
+    cuerpo:{ ids, precio, cantidad, plazoDias, notas, estadoProducto, condicion, foto, compromisoEnvio } });
+}
+
+export async function misOfertas(){
+  if (!hayCuenta()) return [];
+  return (await api('/mis-ofertas')).ofertas || [];
+}
+
+/** Achica la foto en el teléfono antes de subirla (JPG, lado mayor 1000 px, menos de ~430 KB). */
+export function reducirFoto(archivo, lado = 1000, calidad = 0.72){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(archivo);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, lado / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      let q = calidad, datos = c.toDataURL('image/jpeg', q);
+      while (datos.length > 580000 && q > 0.35){ q -= 0.1; datos = c.toDataURL('image/jpeg', q); }
+      datos.length > 580000 ? reject(new Error('La foto es muy pesada. Probá con otra.')) : resolve(datos);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No pudimos leer esa imagen. Probá con otra foto.')); };
+    img.src = url;
+  });
+}
+
+export const aceptarOferta = (pedidoId, ofertaId) => api(`/${pedidoId}/aceptar`, { metodo:'POST', cuerpo:{ ofertaId } });
+export const cerrarPedido  = pedidoId => api(`/${pedidoId}/cerrar`, { metodo:'POST', cuerpo:{} });
+export const marcarLeido   = pedidoId => api(`/${pedidoId}/leido`, { metodo:'POST', cuerpo:{} });
+
+/* ---------------- Proveedores ---------------- */
+export async function entrarComoProveedor(codigo){
+  try{ localStorage.setItem(CLAVE_PROVEEDOR, String(codigo).trim().toUpperCase()); }catch{}
+  try{
+    const d = await api('/proveedor');
+    try{ localStorage.setItem(CLAVE_PROVEEDOR + '.nombre', d.nombre); }catch{}
+    return d.nombre;
+  }catch(e){
+    salirComoProveedor();
+    throw e;
+  }
+}
+export function salirComoProveedor(){
+  try{ localStorage.removeItem(CLAVE_PROVEEDOR); localStorage.removeItem(CLAVE_PROVEEDOR + '.nombre'); }catch{}
+}
+export const puedeOfertar = () => esDueno() || !!codigoProveedor();
+
+export const listarProveedores = async () => (await api('/proveedores', { comoDueno:true })).proveedores || [];
+export const crearProveedor = datos => api('/proveedores', { metodo:'POST', cuerpo:datos, comoDueno:true });
+export const bajaProveedor = id => api(`/proveedores/${id}/baja`, { metodo:'POST', cuerpo:{}, comoDueno:true });
+
+/* ---------------- Agrupar lo que piden varios ---------------- */
 
 /**
  * ¿Dos personas están pidiendo lo mismo?
- * Acá la vara tiene que ser MÁS BLANDA que al comparar productos de una
- * tienda: uno escribe "iMac 24 pulgadas M1" y el otro "iMac 24 M1 256GB",
- * y están pidiendo la misma máquina. Si no los juntamos, la bolsa no
- * sirve para nada: el valor está justo en sumar la demanda.
+ * La vara es más blanda que al comparar productos de una tienda:
+ * "iMac 24 pulgadas M1" e "iMac 24 M1 256GB" son el mismo pedido.
  */
 export function mismaIntencion(a, b){
   if (limpiar(a) === limpiar(b)) return true;
@@ -95,62 +166,55 @@ export function mismaIntencion(a, b){
   if (!ta.size || !tb.size) return false;
   let comunes = 0;
   for (const t of ta) if (tb.has(t)) comunes++;
-  const chico = Math.min(ta.size, tb.size);
-  return comunes / chico >= 0.5 && comunes >= 2;
+  return comunes / Math.min(ta.size, tb.size) >= 0.5 && comunes >= 2;
 }
 
-/**
- * Junta órdenes que piden lo mismo. Acá está el valor: una persona
- * pidiendo no mueve a nadie; 140 pidiendo lo mismo mueven a todos.
- */
-export function agregar(lista = ordenes()){
+/** Junta los pedidos abiertos que piden lo mismo. */
+export function agregar(lista = cache){
   const bloques = [];
-  for (const o of lista){
-    if (o.estado === 'cerrada') continue;
-    const destino = bloques.find(b => mismaIntencion(b.titulo, o.titulo));
-    if (destino) destino.ordenes.push(o);
-    else bloques.push({ titulo:o.titulo, imagen:o.imagen, rubro:o.rubro, ordenes:[o] });
+  for (const p of lista){
+    if (estadoDe(p) !== 'abierta') continue;
+    const b = bloques.find(x => mismaIntencion(x.titulo, p.titulo));
+    if (b) b.pedidos.push(p); else bloques.push({ titulo:p.titulo, pedidos:[p] });
   }
   return bloques.map(b => {
-    const unidades = b.ordenes.reduce((a,o) => a + o.cantidad, 0);
-    const precios  = b.ordenes.map(o => o.precioMax);
-    const comprometido = b.ordenes.reduce((a,o) => a + o.precioMax * o.cantidad, 0);
-    const senas = b.ordenes.reduce((a,o) => a + o.sena, 0);
-    const vence = Math.min(...b.ordenes.map(o => o.vence));
-    const todasLasOfertas = b.ordenes.flatMap(o => (o.ofertas || []).map(x => ({ ...x, ordenId:o.id })));
-    const mejor = todasLasOfertas.slice().sort((a,b2) => a.precio - b2.precio)[0] || null;
-
+    const precios = b.pedidos.map(p => p.precioMax);
+    const vistas = new Set();
+    const ofertas = b.pedidos.flatMap(p => p.ofertas || [])
+      .filter(o => !vistas.has(o.id) && vistas.add(o.id))
+      .sort((x, y) => x.precio - y.precio);
+    const vence = Math.min(...b.pedidos.map(p => p.vence));
     return {
-      ...b, unidades, personas:b.ordenes.length,
-      precioMaxPromedio: Math.round(precios.reduce((a,p) => a + p, 0) / precios.length),
-      precioMaxMinimo: Math.min(...precios),
-      comprometido: Math.round(comprometido),
-      senas: Math.round(senas),
-      vence, diasRestantes: Math.max(0, Math.ceil((vence - Date.now()) / 864e5)),
-      ofertas: todasLasOfertas.sort((a,b2) => a.precio - b2.precio),
-      mejorOferta: mejor,
-      llenable: mejor ? mejor.precio <= Math.min(...precios) : false,
-      imagen: b.ordenes.find(o => o.imagen)?.imagen || null
+      ...b, ordenes:b.pedidos,
+      unidades:b.pedidos.reduce((a, p) => a + p.cantidad, 0),
+      personas:b.pedidos.length,
+      precioMaxPromedio:Math.round(precios.reduce((a, x) => a + x, 0) / precios.length),
+      precioMaxMinimo:Math.min(...precios),
+      comprometido:Math.round(b.pedidos.reduce((a, p) => a + p.precioMax * p.cantidad, 0)),
+      senas:0,
+      vence, diasRestantes:Math.max(0, Math.ceil((vence - Date.now()) / 864e5)),
+      ofertas, mejorOferta:ofertas[0] || null,
+      llenable: ofertas[0] ? ofertas[0].precio <= Math.min(...precios) : false,
+      imagen:b.pedidos.find(p => p.imagen)?.imagen || null,
+      rubro:b.pedidos.find(p => p.rubro)?.rubro || null
     };
-  }).sort((a,b) => b.comprometido - a.comprometido);
+  }).sort((a, b) => b.comprometido - a.comprometido);
 }
 
 /** Lo que el dueño necesita saber: qué pidieron y nadie sirvió. */
 export function sinSatisfacer(){
-  return agregar().filter(b => !b.llenable)
-                  .map(b => ({ ...b, oportunidad: b.comprometido }));
+  return agregar().filter(b => !b.llenable).map(b => ({ ...b, oportunidad:b.comprometido }));
 }
 
-/** Si NiJu la llena importando, ¿cuánto deja? */
+/** Si NiJu lo consigue a este costo por unidad, ¿cuánto deja? (solo el dueño lo ve) */
 export function simularLlenado(bloque, costoUnitARS){
-  const precio = bloque.precioMaxMinimo;   // para llenar hay que respetar al más exigente
+  const precio = bloque.precioMaxMinimo;          // hay que respetar al más exigente
   const ingreso = precio * bloque.unidades;
   const costo = costoUnitARS * bloque.unidades;
   return {
     unidades:bloque.unidades, precio, ingreso, costo,
-    margen: Math.round(ingreso - costo),
+    margen:Math.round(ingreso - costo),
     margenPct: ingreso ? Math.round((1 - costo / ingreso) * 100) : 0,
-    capitalPropio: Math.max(0, Math.round(costo - bloque.senas)),
-    financiadoPorClientes: Math.min(100, Math.round(bloque.senas / costo * 100))
+    capitalPropio:Math.round(costo)
   };
 }

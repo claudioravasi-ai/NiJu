@@ -280,3 +280,13 @@
   .t-pasos{ grid-template-columns:repeat(2, minmax(0,1fr)); }
 }
 @media (prefers-reduced-motion:reduce){ .t-pasos li:hover{ transform:none; } }
+
+/* ---- Vendé al mundo · Apps y webs a medida ---- */
+.sv-quien{ display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--accion); margin-bottom:2px; }
+.sv-resultado{ background:var(--accion); color:var(--accion-tx); border-radius:var(--r-lg); padding:16px 18px; display:flex; flex-direction:column; gap:4px; }
+.sv-resultado small{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; opacity:.9; }
+.sv-resultado b{ font-size:24px; line-height:1.15; }
+.sv-scroll{ overflow-x:auto; background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow); }
+.sv-tabla{ width:100%; border-collapse:collapse; font-size:13.5px; min-width:560px; }
+.sv-tabla th, .sv-tabla td{ text-align:left; padding:9px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+.sv-tabla th{ font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--tx-2); }

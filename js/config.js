@@ -5,7 +5,7 @@ export const CONFIG = {
   nombre: 'NiJu',
   claim: 'Comprá todo, de todo y para todo.',
   claimLargo: 'Un solo lugar. Una app. El mundo a tus dedos: sin trámites, sin riesgos, del deseo a tu casa.',
-  version: '0.3.0',
+  version: '0.4.0',
 
   /** Datos del titular para los términos y el pie. Se completan al
       constituir la empresa (y con ellos, el Data Fiscal de ARCA). */
@@ -24,6 +24,12 @@ export const CONFIG = {
       'proxy' = TODAS las tiendas van al backend (solo cuando estén todas
                 las claves cargadas; si falta una, esa tienda no responde) */
   modoDatos: 'mixto',
+
+  /** Asistente con inteligencia artificial (Claude, por el worker).
+      Apagado a propósito: tiene costo por consulta y Claudio decidió no
+      pagarlo. Con false, la NCM se busca en el Arancel y las preguntas las
+      responde el asesor local (engine/asesor.js), gratis. */
+  asistenteIA: false,
 
   /** Backend propio (ver backend/DESPLIEGUE.md). */
   api: 'https://niju-api.claudio-ravasi.workers.dev/v1',

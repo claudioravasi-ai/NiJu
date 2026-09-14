@@ -17,6 +17,8 @@ import { vistaMayorista } from './ui/mayorista.js';
 import { vistaPedido } from './ui/pedido.js';
 import { vistaGrupal } from './ui/grupal.js';
 import { vistaDemanda } from './ui/demanda.js';
+import { vistaExportar } from './ui/exportar.js';
+import { vistaDesarrollo } from './ui/desarrollo.js';
 import { vistaTienda } from './ui/tienda.js';
 import { esDueno, entrar, salir, verificarClave } from './engine/sesion.js';
 import { vistaCarrito } from './ui/carrito.js';
@@ -27,6 +29,7 @@ import { vistaTiendas } from './ui/tiendas.js';
 import { vistaMisCompras } from './ui/ordenes.js';
 import { modo, hayCuenta, refrescarPerfil } from './engine/nube.js';
 import { listarOrdenes } from './engine/ordenes.js';
+import { misPedidos } from './engine/demanda.js';
 import { tiendasActivas } from './connectors/registry.js';
 import { logoTienda, selectorDolar, selectorMoneda } from './ui/components.js';
 
@@ -39,6 +42,8 @@ const NAV = [
   { ruta:'#/grupal',    icono:'usuario',  label:'Compra grupal' },
   { ruta:'#/mayorista', icono:'caja',     label:'Por mayor' },
   { ruta:'#/grandes',   icono:'mundo',    label:'Compras grandes' },
+  { ruta:'#/exportar',  icono:'envio',    label:'Vendé al mundo' },
+  { ruta:'#/desarrollo',icono:'panel',    label:'Apps y webs a medida' },
   { ruta:'#/mensajes',  icono:'chat',     label:'Mensajes' },
   { ruta:'#/carrito',   icono:'carrito',  label:'Carrito' },
   { ruta:'#/compras',   icono:'caja',     label:'Mis compras' },
@@ -380,6 +385,8 @@ function rutear({ buscador }){
   } else if (ruta === '/pedido'){   vista.replaceChildren(vistaPedido(ir));
   } else if (ruta === '/grupal'){   vista.replaceChildren(vistaGrupal(ir));
   } else if (ruta === '/demanda'){  vista.replaceChildren(vistaDemanda(ir));
+  } else if (ruta === '/exportar'){ vista.replaceChildren(vistaExportar(ir));
+  } else if (ruta === '/desarrollo'){ vista.replaceChildren(vistaDesarrollo(ir));
   } else if (ruta === '/carrito'){  vista.replaceChildren(vistaCarrito(ir));
   } else if (ruta === '/cuenta'){   vista.replaceChildren(vistaCuenta(ir));
   } else if (ruta === '/compras'){  vista.replaceChildren(vistaMisCompras(ir));
@@ -405,9 +412,11 @@ async function revisarAvisos(){
     const m = await modo();
     if (m === 'sin-conexion' || (m === 'nube' && !hayCuenta())) return pintarAvisos(0);
     const os = await listarOrdenes({ dueno:false });
-    const n = os.reduce((a, o) => a + (o.avisos || []).filter(x => !x.leido).length, 0);
+    let n = os.reduce((a, o) => a + (o.avisos || []).filter(x => !x.leido).length, 0);
+    /* También cuentan las ofertas nuevas de "Pedí y que compitan". */
+    n += (await misPedidos().catch(() => [])).reduce((a, p) => a + (p.avisos || []).filter(x => !x.leido).length, 0);
     if (avisosContados !== null && n > avisosContados && !location.hash.startsWith('#/compras'))
-      toast('Tenés novedades de tu compra', 'win');
+      toast('Tenés novedades: mirá tus compras y tus pedidos en Mi cuenta', 'win');
     avisosContados = n;
     pintarAvisos(n);
   }catch{}
@@ -480,7 +489,8 @@ function piePagina(){
           el('label', {}, 'Idioma', el('select', { 'aria-label':'Idioma' }, el('option', {}, 'Español (Argentina)'))))),
       el('div', {}, el('h4', {}, 'Comprar'), el('ul', {},
         enlace('Buscar en todas las tiendas', '#/buscar'), enlace('Traelo por mí', '#/pedido'), enlace('Compras grandes', '#/grandes'),
-        enlace('Compra grupal', '#/grupal'), enlace('Por mayor', '#/mayorista'), enlace('Pedí y que compitan', '#/demanda'))),
+        enlace('Compra grupal', '#/grupal'), enlace('Por mayor', '#/mayorista'), enlace('Pedí y que compitan', '#/demanda'),
+        enlace('Vendé al mundo', '#/exportar'), enlace('Apps y webs a medida', '#/desarrollo'))),
       el('div', {}, el('h4', {}, 'Ayuda'), el('ul', {},
         enlace('Preguntas frecuentes', '#/ayuda'), enlace('Mis compras', '#/compras'), enlace('Botón de arrepentimiento', '#/compras'),
         enlace('Lo impositivo, resuelto', '#/impuestos'), enlace('Calculadora de importación', '#/impuestos?tab=calc'), enlace('Escribinos', '#/mensajes'))),

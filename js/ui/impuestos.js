@@ -6,9 +6,10 @@
    ya pagó, trazable pedido por pedido y descargable en PDF.
    ============================================================ */
 import { el, plata, ic, toast, hoja } from '../util.js';
-import { mejorRegimen, REGLAS } from '../engine/taxes.js';
-import { calcularFee, comparadorDeFee } from '../engine/fees.js';
-import { PERFILES, carpetaAnual, csvCarpeta, descargarCSV, consecuenciasFiscales } from '../engine/fiscal.js';
+import { REGLAS } from '../engine/taxes.js';
+import { comparadorDeFee } from '../engine/fees.js';
+import { PERFILES, carpetaAnual, csvCarpeta, descargarCSV } from '../engine/fiscal.js';
+import { panelImportacion, tarjetaCotizacion } from './desglose.js';
 import { comprasDelCliente, DIAS_ARREPENTIMIENTO } from '../engine/ordenes.js';
 import { hayCuenta, guardarPerfilNube } from '../engine/nube.js';
 import { RUBROS } from '../data/catalog.js';
@@ -120,8 +121,8 @@ function guia(ir, cambiar){
         `te corresponde Factura ${P.computaIVA ? 'A' : 'B'} por la gestión de NiJu.`,
         ['facturacion']),
       concepto('mundo', 'Comprar en el exterior',
-        [`Lo que llega por courier puerta a puerta es para uso personal. Con los valores que usa hoy la app: franquicia de US$ ${cr.franquiciaUSD} por envío, hasta US$ ${cr.topeValorUSD} y ${cr.topePesoKg} kg. Lo que supera la franquicia paga ${Math.round(cr.derechoExcedente * 100)}%.`],
-        'si es para revender no va por courier: corresponde importación con despachante, que tiene otros costos.',
+        [`Lo que llega por courier o por Correo Argentino como pequeño envío es para uso personal: hasta ${cr.franquiciasPorAnio} envíos por año, US$ ${cr.topeValorUSD} y ${cr.topePesoKg} kg por envío y ${cr.unidadesPorItem} unidades iguales. Los primeros US$ ${cr.franquiciaUSD} FOB no pagan derecho de importación ni tasa de estadística; el IVA se paga siempre.`],
+        'si es para revender, o se pasa de cualquiera de esos límites, va exclusivamente por importación con despachante.',
         ['envios'], accion('Calcular una compra', () => cambiar('calc'))),
       concepto('envio', 'Las percepciones',
         'Son adelantos de impuestos que te cobran en algunas compras, por ejemplo con tarjeta en moneda extranjera o en una importación. No son plata perdida: se descuentan de tus impuestos o se piden en devolución.',
@@ -164,122 +165,16 @@ function guia(ir, cambiar){
 }
 
 /* ---------------- Calculadora ----------------
-   Un simulador como los de los e-commerce grandes: pocos datos a la
-   izquierda, y a la derecha un resultado grande con de qué está hecho
-   el precio y las dos formas de traerlo. */
-const r2 = n => Math.round(n * 100) / 100;
-const dolares2 = v => `US$ ${Number(v).toLocaleString('es-AR', { maximumFractionDigits:2 })}`;
-
+   El mismo panel que "Traelo por mí", con los datos cargados a mano:
+   posición NCM del Arancel de ARCA, las cinco etapas del viaje con
+   tarifas publicadas y el desglose línea por línea. Antes tenía un
+   flete de US$ 35 fijo que no salía de ninguna tarifa, y le ponía
+   precio al courier aunque la compra no pudiera ir por courier. */
 function calculadora(ir){
-  const estado = { valorUSD:200, fleteUSD:35, pesoKg:0.5, rubro:'tecnologia', unidades:1, destino:'uso', usadoAnualUSD:0 };
-  const salida = el('div', { class:'k2-salida' });
-
-  const numero = (etiqueta, clave, ayuda) => el('label', { class:'k2-campo' },
-    el('span', {}, etiqueta),
-    el('div', { class:'k2-input' }, el('b', {}, 'US$'),
-      el('input', { type:'number', inputmode:'decimal', min:'0', step:'1', value:String(estado[clave]),
-        oninput:e => { estado[clave] = +e.target.value || 0; calcular(); } })),
-    ayuda ? el('small', {}, ayuda) : null);
-
-  const botones = (etiqueta, clave, opciones) => {
-    const cont = el('div', { class:'k2-chips', role:'group', 'aria-label':etiqueta });
-    const pintar = () => cont.replaceChildren(...opciones.map(([valor, texto]) =>
-      el('button', { class:'v-chip' + (estado[clave] === valor ? ' on' : ''), 'aria-pressed':String(estado[clave] === valor),
-        onclick:() => { estado[clave] = valor; pintar(); calcular(); } }, texto)));
-    pintar();
-    return el('div', { class:'k2-campo' }, el('span', {}, etiqueta), cont);
-  };
-
-  const cantidad = el('b', {}, String(estado.unidades));
-  const cambiarUnidades = d => { estado.unidades = Math.max(1, estado.unidades + d); cantidad.textContent = String(estado.unidades); calcular(); };
-
-  const form = el('section', { class:'k2-form' },
-    el('h2', {}, '¿Cuánto me sale traerlo?'),
-    el('p', { class:'c-sub' }, 'Cargá lo que viste en una tienda de afuera y te decimos cuánto pagás en total, puesto en tu casa.'),
-    numero('Precio del producto', 'valorUSD', 'Lo que dice la tienda, sin el envío.'),
-    numero('Envío internacional', 'fleteUSD', 'Si no lo sabés, dejá el que está.'),
-    botones('¿Cuánto pesa?', 'pesoKg', [[0.5, 'Hasta 1 kg'], [2, '1 a 3 kg'], [6, '3 a 10 kg'], [25, 'Más de 10 kg']]),
-    botones('¿Para qué es?', 'destino', [['uso', 'Para mí o mi familia'], ['reventa', 'Para vender']]),
-    el('div', { class:'k2-campo' }, el('span', {}, 'Unidades iguales'),
-      el('div', { class:'qty k2-qty' },
-        el('button', { 'aria-label':'Una menos', onclick:() => cambiarUnidades(-1) }, '−'), cantidad,
-        el('button', { 'aria-label':'Una más', onclick:() => cambiarUnidades(1) }, '+'))),
-    el('label', { class:'k2-campo' }, el('span', {}, 'Rubro'),
-      el('select', { class:'inp', onchange:e => { estado.rubro = e.target.value; calcular(); } },
-        ...RUBROS.map(r => el('option', { value:r.id, selected:r.id === estado.rubro || null }, r.nombre)))),
-    el('details', { class:'k2-mas' }, el('summary', {}, 'Más opciones'),
-      numero('Franquicia ya usada este año', 'usadoAnualUSD', 'Si ya trajiste algo este año y querés tenerlo en cuenta.')));
-
-  function calcular(){
-    const m = mejorRegimen(estado);
-    const courierNoVa = m.courier.bloqueado || estado.destino === 'reventa';
-    if (estado.destino === 'reventa'){ m.elegido = 'general'; m.motivo = 'Para vender no se puede traer por courier: va con despachante.'; }
-    const opcion = rg => {
-      const fee = calcularFee({ valorUSD:estado.valorUSD, fleteUSD:estado.fleteUSD, tipo:rg === 'general' ? 'mayorista' : 'internacional' });
-      return { rg, r:m[rg], fee, total:r2(m[rg].total + fee.feeUSD) };
-    };
-    const courier = opcion('courier'), despachante = opcion('general');
-    const elegida = m.elegido === 'courier' ? courier : despachante;
-    const otra = elegida === courier ? despachante : courier;
-
-    const partes = [
-      ['Producto', estado.valorUSD, 'k2-c-prod'],
-      ['Envío', estado.fleteUSD, 'k2-c-envio'],
-      [elegida.rg === 'courier' ? 'Impuestos' : 'Impuestos y aduana', r2(elegida.r.impuestos + (elegida.r.gastos || 0)), 'k2-c-imp'],
-      ['Gestión NiJu', elegida.fee.feeUSD, 'k2-c-niju']
-    ];
-    const total = elegida.total || 1;
-
-    const tarjeta = o => {
-      const noVa = o.rg === 'courier' && courierNoVa;
-      return el('details', { class:'k2-opcion' + (o === elegida ? ' elegida' : '') + (noVa ? ' no-va' : '') },
-        el('summary', {},
-          el('span', {}, el('b', {}, o.rg === 'courier' ? 'Por courier' : 'Con despachante'),
-            el('small', {}, o.rg === 'courier' ? 'Puerta a puerta, para uso personal' : 'Importación formal: para vender o compras grandes')),
-          el('span', { class:'k2-opcion-total' }, dolares2(o.total),
-            o === elegida ? el('em', {}, 'Te conviene')
-              : el('small', {}, noVa ? 'No se puede usar' : `${dolares2(r2(o.total - elegida.total))} más`))),
-        el('div', { class:'k2-opcion-cuerpo' },
-          ...o.r.lineas.map(l => el('div', { class:'cost-line' },
-            el('span', { class:'lbl' }, l.k, l.detalle ? el('i', { class:'tiny dim', style:{ fontStyle:'normal' } }, ' · ' + l.detalle) : null),
-            el('span', { class:'mono' }, l.v ? dolares2(l.v) : '—'))),
-          el('div', { class:'cost-line' }, el('span', { class:'lbl' }, 'Gestión NiJu'), el('span', { class:'mono' }, dolares2(o.fee.feeUSD))),
-          el('div', { class:'cost-line total' }, el('span', {}, 'Total'), el('span', {}, dolares2(o.total))),
-          ...o.r.avisos.map(a => el('div', { class:'notice ' + (a.t === 'bad' ? 'notice-bad' : a.t === 'ok' ? 'notice-ok' : ''), style:{ marginTop:'8px' } }, a.m))));
-    };
-
-    const fiscal = consecuenciasFiscales({
-      tipo:'internacional', regimen:m.elegido, totalARS:elegida.r.total * FX.tarjeta,
-      impuestosImportARS:elegida.r.impuestos * FX.tarjeta, ivaFeeARS:0, valorUSD:estado.valorUSD, destino:estado.destino
-    }, store.get('usuario')?.perfilFiscal || 'consumidor_final');
-    const f = courier.r.franquicia;
-
-    salida.replaceChildren(
-      el('section', { class:'k2-resultado', 'aria-live':'polite' },
-        el('small', {}, 'Te sale en total, puesto en tu casa'),
-        el('div', { class:'k2-total' }, plata(elegida.total * FX.tarjeta)),
-        el('div', { class:'k2-total-usd' }, `${dolares2(elegida.total)} · al dólar tarjeta, que es lo que cuesta pagar afuera`),
-        el('div', { class:'k2-motivo' }, ic('check'), m.motivo),
-        el('div', { class:'k2-barra', role:'img', 'aria-label':'De qué está hecho el precio' },
-          ...partes.filter(([, v]) => v > 0).map(([k, v, clase]) => el('i', { class:clase, title:`${k}: ${dolares2(v)}`, style:{ width:(v / total * 100) + '%' } }))),
-        el('ul', { class:'k2-leyenda' }, ...partes.map(([k, v, clase]) =>
-          el('li', {}, el('i', { class:clase }), el('span', {}, k), el('b', {}, dolares2(v)))))),
-      courierNoVa ? '' : el('section', { class:'k2-franq' },
-        el('div', { class:'row-b' }, el('b', {}, 'Franquicia del envío'), el('span', { class:'mono' }, `${dolares2(f.aplicada)} de ${dolares2(f.tope)}`)),
-        el('div', { class:'f-barra' }, el('i', { style:{ width:Math.min(100, f.tope ? f.aplicada / f.tope * 100 : 0) + '%' } })),
-        el('small', {}, 'Es la parte del valor que no paga derechos. ', marcaVerificar())),
-      el('h3', { class:'k2-sub' }, 'Las dos formas de traerlo'),
-      tarjeta(elegida), tarjeta(otra),
-      ...fiscal.avisos.map(a => el('div', { class:'notice ' + (a.t === 'bad' ? 'notice-bad' : '') }, a.m)),
-      el('div', { class:'c-acciones' },
-        el('button', { class:'btn btn-win', onclick:() => ir('#/pedido') }, ic('mundo'), 'Que NiJu me lo traiga'),
-        elegida.rg === 'general' ? el('button', { class:'btn', onclick:() => ir('#/grandes') }, 'Cómo son las compras grandes') : null,
-        el('button', { class:'btn btn-ghost', onclick:() => ir('#/impuestos?tab=perfil') }, 'Ver mi caso')),
-      comparativaFee(estado.valorUSD));
-  }
-  calcular();
-
-  return el('div', { class:'section' }, el('div', { class:'k2' }, form, salida));
+  const comparativa = el('div');
+  return el('div', { class:'section' },
+    panelImportacion({ ir, alCambiar:r => comparativa.replaceChildren(r.fob ? comparativaFee(r.fob) : '') }),
+    comparativa);
 }
 
 function comparativaFee(valorUSD){
@@ -320,7 +215,7 @@ function carpeta(ir, cambiar){
     cont.replaceChildren(el('div', { class:'c-card center', style:{ padding:'36px' } },
       el('h3', {}, 'Entrá con tu cuenta para ver tu carpeta'),
       el('p', { class:'c-sub' }, 'La carpeta se arma con tus compras pagadas.'),
-      el('button', { class:'btn btn-win', onclick:() => ir('#/cuenta') }, 'Entrar')));
+      el('button', { class:'btn btn-win', onclick:() => ir('#/cuenta') }, 'Entrar')), cotizacionesGuardadas());
     return cont;
   }
 
@@ -401,6 +296,8 @@ function carpeta(ir, cambiar){
             el('b', {}, plata(o.totalARS)))),
           el('button', { class:'c-accion', onclick:() => ir('#/compras') }, 'Ir a pagar en Mis compras', ic('der'))) : '',
 
+        cotizacionesGuardadas(),
+
         el('p', { class:'c-legal' },
           'Trazabilidad: cada compra lleva su número de pedido y la fecha en que se acreditó el pago. Si un pedido se cancela, sale de la carpeta. El resumen PDF lleva un código de control que cambia si cambia cualquier dato.'));
     };
@@ -410,6 +307,20 @@ function carpeta(ir, cambiar){
   });
 
   return cont;
+}
+
+/* Cotizaciones de importación guardadas: no son compras, no cuentan
+   en la carpeta, pero guardan todo el desglose para consultarlo. */
+function cotizacionesGuardadas(){
+  const lista = [
+    ...(store.get('importaciones') || []),
+    ...(store.get('pedidos') || []).filter(p => p.desglose).map(p => ({ ...p.desglose, pedidoId:p.id }))
+  ].sort((a, b) => b.creado - a.creado);
+  if (!lista.length) return '';
+  return el('div', { class:'c-card', style:{ marginTop:'16px' } },
+    el('div', { class:'c-card-head' }, el('h2', {}, 'Tus cotizaciones de importación')),
+    el('p', { class:'c-sub' }, 'Guardadas con su desglose completo. No son compras: no cuentan en la carpeta hasta que se paguen.'),
+    el('div', { class:'c-ops' }, ...lista.map(tarjetaCotizacion)));
 }
 
 /* ---------------- Mi condición ---------------- */
@@ -476,24 +387,23 @@ const dolares = v => `US$ ${Number(v).toLocaleString('es-AR')}`;
 /* Cada parámetro con su nombre en castellano y cómo leerlo. */
 const EXPLICADOS = {
   courier:[
-    ['franquiciaUSD', 'Parte de cada envío que no paga derechos', dolares],
-    ['derechoExcedente', 'Lo que se paga sobre lo que supera la franquicia', porciento],
+    ['franquiciaUSD', 'Parte de cada envío (FOB) sin derecho ni tasa de estadística', dolares],
+    ['franquiciasPorAnio', 'Pequeños envíos por persona por año', v => String(v)],
     ['topeValorUSD', 'Valor máximo por envío', dolares],
-    ['topePesoKg', 'Peso máximo por envío', v => `${v} kg`],
-    ['unidadesPorItem', 'Unidades iguales antes de tomarse como compra comercial', v => String(v)],
-    ['franquiciasPorAnio', 'Cantidad de franquicias por año', v => v == null ? 'Sin tope cargado' : String(v)],
-    ['ivaIncluido', '¿El porcentaje ya incluye el IVA?', siNo],
+    ['topePesoKg', 'Peso máximo por paquete', v => `${v} kg`],
+    ['unidadesPorItem', 'Unidades iguales como máximo', v => String(v)],
+    ['tasaEstadistica', 'Tasa de estadística sobre lo que supera la franquicia', porciento],
+    ['iva', 'IVA (se paga siempre, aun dentro de la franquicia)', porciento],
     ['requiereCUIT', '¿Hace falta CUIT?', siNo]
   ],
   general:[
-    ['derechoPorDefecto', 'Derecho de importación promedio (depende del producto)', porciento],
-    ['tasaEstadistica', 'Tasa de estadística', porciento],
+    ['derechoPorDefecto', 'Derecho de importación promedio (el real sale del Arancel)', porciento],
+    ['tasaEstadistica', 'Tasa de estadística (con tope)', porciento],
     ['iva', 'IVA de importación', porciento],
-    ['ivaAdicional', 'Percepción adicional de IVA', porciento],
+    ['ivaAdicional', 'Percepción de IVA (no aplica a uso particular)', porciento],
     ['ganancias', 'Percepción de Ganancias', porciento],
-    ['iibb', 'Percepción de Ingresos Brutos (varía por provincia)', porciento],
-    ['honorariosDespachante', 'Honorarios del despachante', porciento],
-    ['gastosFijosUSD', 'Gastos fijos de aduana y depósito', dolares],
+    ['gananciasUsoParticular', 'Percepción de Ganancias para uso particular', porciento],
+    ['despachanteReferenciaUSD', 'Honorario mínimo sugerido de despachante (CDA)', dolares],
     ['requiereCUIT', '¿Hace falta CUIT?', siNo]
   ],
   tarjeta:[

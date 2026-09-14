@@ -54,7 +54,9 @@ export async function buscar(consulta, opts = {}, onProgreso = () => {}){
     }catch(e){
       estado[i] = { ...estado[i], estado:'fail', ms:Math.round(performance.now() - ini), error:String(e.message || e) };
     }
-    onProgreso({ tiendas:[...estado], listo:false });
+    /* Con cada tienda que contesta se mandan las ofertas juntadas hasta
+       ahora: la pantalla muestra lo que ya hay mientras siguen las demás. */
+    onProgreso({ tiendas:[...estado], listo:false, ofertas:todas });
   }));
 
   /* Cada consulta alimenta el historial. Es el activo que nadie

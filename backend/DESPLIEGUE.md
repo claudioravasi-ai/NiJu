@@ -156,3 +156,25 @@ además le lleguen por email al cliente:
 2. Creá una API key.
 3. En el Worker: `RESEND_API_KEY` = la key, `AVISOS_DESDE` = `NiJu <avisos@tudominio.com>`.
 4. Deploy.
+
+
+## Asistente de importación (v0.4.0)
+
+El asistente que clasifica la posición NCM de un producto y responde las
+preguntas del cliente usa Claude desde el worker. Sin esta clave la app
+igual funciona: busca la NCM por palabras en el Arancel de ARCA y responde
+con un glosario básico, y lo aclara en pantalla.
+
+1. Creá una clave en https://console.anthropic.com → API Keys.
+2. En Cloudflare: Workers → niju-api → Settings → Variables and Secrets →
+   Add → tipo **Secret**, nombre `ANTHROPIC_API_KEY` (así, sin puntos ni
+   espacios), valor: la clave.
+3. Pegá el `worker.js` nuevo (Edit code → reemplazar todo → Deploy).
+4. Verificá: `https://niju-api.claudio-ravasi.workers.dev/v1/estado` tiene
+   que decir `"asesor": true`.
+
+Cada IP puede hacer hasta 40 consultas por día (`CONSULTAS_POR_DIA` en
+worker.js), contadas en el KV `NIJU`, porque cada consulta tiene costo.
+
+El worker también sirve `/v1/arancel.zip`, una copia del Arancel Integrado
+de ARCA para cuando el navegador no llega al servidor de ARCA.

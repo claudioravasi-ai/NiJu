@@ -298,3 +298,9 @@ button.c-kpi:hover{ transform:translateY(-2px); box-shadow:var(--shadow-2); }
   .k2{ grid-template-columns:minmax(0,1fr); }
   .k2-form{ position:static; }
 }
+
+/* Fecha de nacimiento en tres listas (día, mes, año): anda igual en iPad,
+   iPhone, Android y computadora. */
+.fecha-sel{ display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.5fr) minmax(0,1fr); gap:6px; }
+.fecha-sel:focus{ outline:none; }
+.fecha-sel.inp-error .inp{ border-color:var(--bad); }

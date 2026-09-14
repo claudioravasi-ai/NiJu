@@ -9,7 +9,7 @@ const KEY = 'niju.state.v1';
 const PERSISTIR = ['carrito','favoritos','alertas','usuario','historial','comprasAnio',
                    'nijuExtra','config','hilos','campanias','vistos','pedidos',
                    'pilotos','campaniasGrupales','cotizaciones',
-                   'ordenes','ordenesDemanda','lotes'];
+                   'ordenes','ordenesDemanda','lotes','importaciones'];
 
 const INICIAL = {
   usuario: null,                  // { nombre, email, cuit, direccion, tipo }
@@ -21,6 +21,7 @@ const INICIAL = {
   comprasAnio: [],                // para el control de franquicia
   nijuExtra: [],                  // productos propios cargados desde el panel
   pedidos: [],                    // "traelo por mí": productos pedidos por link
+  importaciones: [],              // cotizaciones de importación guardadas, con su desglose
   ordenes: [],                    // compras asistidas: una orden, varias tiendas
   lotes: [],                      // compras hechas por el dueño en cada tienda (sin base de datos)
   ordenesDemanda: [],             // bolsa de demanda

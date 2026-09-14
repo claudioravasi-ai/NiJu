@@ -1,184 +1,466 @@
 /* ============================================================
-   NiJu — Bolsa de demanda (vista pública)
+   NiJu — "Pedí y que compitan" (pantalla)
+   Pedidos abiertos de todos, publicar, ofertar (proveedores aprobados,
+   NiJu o cualquier cliente con cuenta, con foto), "Mis pedidos" y
+   "Mis ofertas" para Mi cuenta, y vistaProveedores() para el Panel.
    ============================================================ */
 import { el, plata, num, ic, toast, fecha, hoja } from '../util.js';
-import { ordenes, agregar, publicar, ofertar, sincronizarDemanda, estadoSyncDemanda,
-         simularLlenado, SENA_DEMANDA } from '../engine/demanda.js';
+import {
+  listarPedidos, misPedidos, agregar, publicar, ofertar, aceptarOferta, cerrarPedido, marcarLeido,
+  simularLlenado, estadoDe, ESTADOS_PEDIDO, diasQueFaltan, codigoProveedor, nombreProveedor,
+  entrarComoProveedor, salirComoProveedor, listarProveedores, crearProveedor, bajaProveedor, DIAS_DEFECTO,
+  misOfertas, fotoUrl, reducirFoto, COMISION_PARTICULAR, TIPOS_OFERTA, ESTADOS_PRODUCTO
+} from '../engine/demanda.js';
 import { RUBROS } from '../data/catalog.js';
-import { store } from '../state.js';
-import { foto } from './components.js';
+import { hayCuenta } from '../engine/nube.js';
+import { esDueno } from '../engine/sesion.js';
+import { botonVolver } from './components.js';
+import { asegurarCuenta } from './cuenta.js';
+
+const REFRESCO_MS = 30 * 1000;
 
 export function vistaDemanda(ir){
   const raiz = el('div', { class:'wrap' });
-  const cuerpo = el('div');
+  const barraProveedor = el('div');
+  const mios = el('div');
+  const lista = el('div', {}, el('div', { class:'card v-sk', style:{ minHeight:'160px' } }));
+  const actualizado = el('small', { class:'tiny dim' });
+  let pedidos = [], error = null;
 
-  function pintar(){
-    const bloques = agregar();
-    const abiertos = bloques.filter(b => b.diasRestantes > 0);
-    const total = bloques.reduce((a,b) => a + b.comprometido, 0);
-
-    cuerpo.replaceChildren(...[
-      el('section', { class:'section' },
-        el('div', { class:'kicker' }, 'Al revés de siempre'),
-        el('h1', { style:{ marginBottom:'8px' } }, 'Pedí y que compitan por vos'),
-        el('p', { class:'muted', style:{ maxWidth:'76ch', marginBottom:'16px' } },
-          'Acá no buscás entre lo que alguien decidió tener. Decís qué querés y cuánto pagás, y salen a buscártelo: tiendas con stock parado, importadores, mayoristas y nosotros. El que lo consigue a tu precio, se lo lleva. Si nadie lo consigue, te devolvemos la seña completa.'),
-        aviso(),
-        el('div', { class:'row wrapf' },
-          el('button', { class:'btn btn-lg btn-win', onclick:() => formPublicar(pintar) }, ic('rayo'), 'Publicar lo que querés')),
-        bloques.length ? el('div', { class:'grid g-3', style:{ marginTop:'18px' } },
-          kpi('Órdenes abiertas', String(abiertos.length)),
-          kpi('Unidades pedidas', num(bloques.reduce((a,b) => a + b.unidades, 0))),
-          kpi('Plata comprometida', plata(total), 'con seña puesta', 'var(--win-tx)')) : null),
-
-      el('section', { class:'section' },
-        el('div', { class:'grid g-3' },
-          paso('1', 'Decís qué y cuánto', 'Publicás el producto y el precio máximo que pagás. Dejás una seña del ' + Math.round(SENA_DEMANDA*100) + '%.'),
-          paso('2', 'Se junta con otros', 'Tu pedido se suma a todos los que pidieron lo mismo. Una persona no mueve a nadie; doscientas mueven a todos.'),
-          paso('3', 'Compiten por servirte', 'Tiendas, importadores y mayoristas ofertan. El primero que llega a tu precio, se lleva la orden.'))),
-
-      bloques.length
-        ? el('section', { class:'section' },
-            el('h2', { style:{ marginBottom:'14px' } }, 'Órdenes abiertas'),
-            el('div', { class:'col' }, ...bloques.map(b => tarjeta(b, pintar))))
-        : el('div', { class:'card center', style:{ padding:'44px' } },
-            el('div', { style:{ fontSize:'40px' } }, '📣'),
-            el('h3', { style:{ margin:'10px 0 6px' } }, 'Todavía no hay demanda publicada'),
-            el('p', { class:'muted tiny', style:{ maxWidth:'54ch', margin:'0 auto' } },
-              'Sé el primero: publicá lo que estás buscando y a cuánto lo pagarías. Es gratis y no te compromete hasta que alguien lo consiga a tu precio.'))
-    ].filter(Boolean));
+  async function cargar(){
+    try{ pedidos = await listarPedidos(); error = null; }
+    catch(e){ error = e.message; }
+    actualizado.textContent = error ? '' : `Actualizado a las ${new Date().toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' })} · se actualiza solo`;
+    pintarLista();
   }
 
-  function aviso(){
-    if (estadoSyncDemanda.remoto) return null;
-    return el('div', { class:'notice notice-bad', style:{ marginBottom:'14px' } },
-      el('b', {}, 'La bolsa está guardada solo en este dispositivo. '),
-      'Una bolsa de demanda que solo ve quien la publicó no sirve de nada: hay que crear el almacén KV en Cloudflare para que sea compartida (backend/DESPLIEGUE.md).');
+  function pintarLista(){
+    if (error){
+      lista.replaceChildren(el('div', { class:'notice notice-bad' }, 'No pudimos leer los pedidos: ' + error));
+      return;
+    }
+    const bloques = agregar(pedidos);
+    lista.replaceChildren(bloques.length
+      ? el('div', { class:'col' }, ...bloques.map(b => tarjeta(b, cargar)))
+      : el('div', { class:'card center', style:{ padding:'36px' } },
+          el('h3', { style:{ margin:'0 0 6px' } }, 'Todavía no hay pedidos abiertos'),
+          el('p', { class:'muted tiny', style:{ maxWidth:'54ch', margin:'0 auto' } },
+            'Publicá lo que buscás: cuando alguien lo consiga, te avisamos en la campanita y lo ves en Mi cuenta.')));
+  }
+
+  function pintarBarraProveedor(){
+    barraProveedor.replaceChildren(
+      esDueno()
+        ? el('div', { class:'notice', style:{ marginBottom:'12px' } }, el('b', {}, 'Estás como dueño: '),
+            'podés ofertar como NiJu y ves el margen de cada pedido. Los proveedores se dan de alta en Panel → Proveedores.')
+        : codigoProveedor()
+          ? el('div', { class:'notice notice-ok', style:{ marginBottom:'12px' } },
+              el('b', {}, `Estás ofertando como ${nombreProveedor() || 'proveedor'} (proveedor aprobado). `),
+              el('button', { class:'p-link', onclick:() => { salirComoProveedor(); pintarBarraProveedor(); pintarLista(); } }, 'Salir'))
+          : el('p', { class:'tiny dim', style:{ margin:'0 0 12px' } }, '¿Sos proveedor aprobado por NiJu? ',
+              el('button', { class:'p-link', onclick:() => formProveedor(() => { pintarBarraProveedor(); pintarLista(); }) }, 'Ingresá tu código de proveedor')));
+  }
+
+  const pedirConCuenta = async (titulo = '') => {
+    const u = await asegurarCuenta();
+    if (u) formPublicar(() => { cargar(); pintarMios(); }, titulo);
+  };
+  const pintarMios = () => mios.replaceChildren(hayCuenta() ? tarjetaMisPedidos(ir) : '');
+  const ofertarConCuenta = async (b, refrescar) => {
+    if (esDueno() || codigoProveedor()) return formOfertar(b, refrescar, false);
+    const u = await asegurarCuenta();
+    if (u) formOfertar(b, refrescar, true);
+  };
+
+  const paso = (n, t, d) => el('div', { class:'card' },
+    el('div', { class:'row', style:{ marginBottom:'6px' } }, el('span', { class:'step-n' }, n), el('b', {}, t)),
+    el('p', { class:'tiny muted' }, d));
+
+  raiz.append(
+    botonVolver(ir),
+    el('section', { class:'section' },
+      el('div', { class:'kicker' }, 'Al revés de siempre'),
+      el('h1', { style:{ marginBottom:'8px' } }, 'Pedí y que compitan por vos'),
+      el('p', { class:'muted', style:{ maxWidth:'76ch', marginBottom:'16px' } },
+        'Publicás qué buscás y hasta cuánto pagás. Te hacen ofertas proveedores aprobados, NiJu y cualquier persona con cuenta que lo tenga o lo consiga más barato. Vos elegís la que te sirve y se convierte en un pedido de compra. Publicar no cuesta nada ni te obliga a comprar.'),
+      el('div', { class:'row wrapf' },
+        el('button', { class:'btn btn-lg btn-win', onclick:() => pedirConCuenta() }, ic('rayo'), 'Publicar lo que buscás'),
+        hayCuenta() ? el('button', { class:'btn btn-lg', onclick:() => mios.scrollIntoView({ behavior:'smooth', block:'start' }) }, 'Ver mis pedidos') : null)),
+
+    el('section', { class:'section' },
+      el('div', { class:'grid g-2' },
+        paso('1', 'Publicás con tu cuenta', 'Qué buscás, cuántos, hasta cuánto pagás por unidad y cuántos días esperás. Queda guardado en Mi cuenta.'),
+        paso('2', 'Se suma con otros', 'Si otras personas piden lo mismo, se juntan en un solo pedido grande: eso atrae mejores precios.'),
+        paso('3', 'Te ofertan y te avisamos', 'Ofertan proveedores aprobados, NiJu y vendedores con cuenta verificada, con foto real. Cada oferta nueva te llega a la campanita.'),
+        paso('4', 'Elegís y se hace la compra', 'Aceptás la que te conviene y se crea el pedido en Mis compras. Recién ahí pagás, como en cualquier compra.')),
+      el('div', { class:'card', style:{ marginTop:'12px', borderLeft:'4px solid var(--win)' } },
+        el('b', {}, '¿Lo tenés o sabés dónde está más barato? Ganá con la diferencia'),
+        el('p', { class:'tiny muted', style:{ margin:'6px 0 0', lineHeight:'1.55' } },
+          `Cualquiera con cuenta puede ofertar: un particular, un emprendedor o un negocio. Subís una foto real, decís si es nuevo, usado o reacondicionado y cómo está, y te comprometés a enviarlo a cada comprador. Si aceptan tu oferta, ganás la diferencia entre lo que te cuesta y lo que ofertaste. NiJu te cobra ${Math.round(COMISION_PARTICULAR * 100)}% de lo que vendés.`)),
+      el('details', { class:'card', style:{ marginTop:'12px' } },
+        el('summary', { style:{ cursor:'pointer', fontWeight:'600' } }, '¿Dónde entra NiJu?'),
+        el('ul', { class:'tiny muted', style:{ margin:'10px 0 0', paddingLeft:'18px', lineHeight:'1.6' } },
+          el('li', {}, 'Aprueba a los proveedores y exige la cuenta completa (DNI, CUIT y domicilio) a quien oferta como particular.'),
+          el('li', {}, `Le cobra ${Math.round(COMISION_PARTICULAR * 100)}% de comisión al particular o emprendedor que vende: es lo que sostiene el servicio.`),
+          el('li', {}, 'Oferta él mismo cuando puede conseguirlo: comprándolo en el país o importándolo para todos juntos.'),
+          el('li', {}, 'Cuando aceptás una oferta, gestiona la compra: cobra, coordina con el proveedor, sigue el envío y responde por el pedido.'),
+          el('li', {}, 'Ve qué se pide y nadie consigue: es la mejor pista para decidir qué traer.')))),
+
+    el('section', { class:'section' }, barraProveedor, mios,
+      el('div', { class:'row-b wrapf', style:{ margin:'14px 0 10px' } },
+        el('h2', { style:{ margin:0 } }, 'Pedidos abiertos'), actualizado),
+      lista));
+
+  pintarBarraProveedor(); pintarMios(); cargar();
+  const reloj = setInterval(() => {
+    if (!raiz.isConnected) return clearInterval(reloj);
+    if (!document.hidden) cargar();
+  }, REFRESCO_MS);
+  return raiz;
+
+  /* ---------- Tarjeta de un pedido (agrupado) ---------- */
+  function tarjeta(b, refrescar){
+    const sim = esDueno() ? simularLlenado(b, Math.round(b.precioMaxMinimo * 0.55)) : null;
+    return el('div', { class:'card', style:{ borderLeft:`4px solid ${b.llenable ? 'var(--win)' : 'var(--accion)'}` } },
+      el('div', { class:'row-b', style:{ gap:'14px', alignItems:'flex-start' } },
+        el('div', { style:{ minWidth:0 } },
+          el('div', { class:'row wrapf', style:{ gap:'7px', marginBottom:'4px' } },
+            el('span', { class:'tag tag-nac' }, `${b.personas} persona${b.personas > 1 ? 's' : ''}`),
+            b.llenable ? el('span', { class:'tag tag-win' }, 'Ya hay quien lo consigue') : null,
+            b.diasRestantes <= 2 ? el('span', { class:'tag tag-warn' }, 'Cierra pronto') : null),
+          el('h3', { style:{ margin:0 } }, b.titulo),
+          el('div', { class:'tiny dim', style:{ marginTop:'4px' } }, `${num(b.unidades)} unidades · cierra en ${b.diasRestantes} días`)),
+        el('div', { style:{ textAlign:'right', flex:'0 0 auto' } },
+          el('div', { class:'kicker' }, 'Pagan hasta'),
+          el('div', { class:'price price-lg' }, plata(b.precioMaxMinimo)),
+          el('div', { class:'tiny dim' }, 'por unidad'))),
+
+      b.ofertas.length
+        ? el('div', { style:{ marginTop:'12px' } },
+            el('div', { class:'kicker', style:{ marginBottom:'6px' } }, `${b.ofertas.length} oferta${b.ofertas.length > 1 ? 's' : ''}`),
+            ...b.ofertas.slice(0, 4).map((o, i) => filaOferta(o, i === 0, b.precioMaxMinimo)))
+        : el('p', { class:'tiny muted', style:{ margin:'12px 0 0' } }, 'Todavía no hay ofertas.'),
+
+      el('div', { class:'row wrapf', style:{ marginTop:'12px' } },
+        el('button', { class:'btn btn-sm btn-win', onclick:() => pedirConCuenta(b.titulo) }, 'Yo también lo quiero'),
+        el('button', { class:'btn btn-sm', onclick:() => ofertarConCuenta(b, refrescar) }, esDueno() ? 'Ofertar como NiJu' : 'Yo lo consigo')),
+
+      sim ? el('details', { style:{ marginTop:'10px' } },
+        el('summary', { class:'tiny dim', style:{ cursor:'pointer' } }, 'Si NiJu lo consigue (solo lo ve el dueño)'),
+        el('div', { style:{ paddingTop:'8px' } },
+          fila('Unidades', String(sim.unidades)),
+          fila('Precio a respetar', plata(sim.precio)),
+          fila('Ingreso', plata(sim.ingreso)),
+          fila('Margen si el costo fuera 55% del precio', `${plata(sim.margen)} (${sim.margenPct}%)`),
+          fila('Capital para comprarlo', plata(sim.capitalPropio)))) : null);
+  }
+}
+
+/* ---------- Mis pedidos (Mi cuenta y esta pantalla) ---------- */
+export function tarjetaMisPedidos(ir){
+  const abiertos = new Set();
+  const cabeza = () => el('div', { class:'c-card-head' }, el('h2', {}, 'Mis pedidos en "Pedí y que compitan"'));
+  const cont = el('section', { class:'c-card', style:{ marginTop:'14px' } }, cabeza(), el('p', { class:'c-sub' }, 'Cargando tus pedidos…'));
+
+  async function pintar(){
+    let lista;
+    try{ lista = await misPedidos(); }
+    catch(e){ cont.replaceChildren(cabeza(), el('div', { class:'notice notice-bad' }, 'No pudimos leer tus pedidos: ' + e.message)); return; }
+    if (!lista.length){
+      cont.replaceChildren(cabeza(), el('p', { class:'c-sub' }, 'Todavía no publicaste pedidos. Decí qué buscás y a cuánto, y que compitan por conseguírtelo.'),
+        el('button', { class:'btn btn-sm', onclick:() => ir('#/demanda') }, 'Publicar un pedido', ic('der')));
+      return;
+    }
+    cont.replaceChildren(cabeza(),
+      el('p', { class:'c-sub' }, 'Se actualiza solo. Cuando llega una oferta nueva te avisamos en la campanita.'),
+      el('div', { class:'c-ops' }, ...lista.map(p => filaPedido(p))));
+  }
+
+  function filaPedido(p){
+    const est = estadoDe(p);
+    const E = ESTADOS_PEDIDO[est] || ESTADOS_PEDIDO.abierta;
+    const sinLeer = (p.avisos || []).filter(a => !a.leido).length;
+    const abierto = est === 'abierta';
+    const ofertas = (p.ofertas || []).slice().sort((a, b) => a.precio - b.precio);
+
+    return el('details', { class:'c-op', open:abiertos.has(p.id) || null, ontoggle:e => {
+      if (!e.currentTarget.open){ abiertos.delete(p.id); return; }
+      abiertos.add(p.id);
+      if (sinLeer) marcarLeido(p.id).then(() => window.dispatchEvent(new Event('niju:avisos'))).catch(() => {});
+    } },
+      el('summary', {},
+        el('span', { class:'c-op-fecha' }, fecha(p.creada), el('small', {}, E.texto)),
+        el('span', { class:'c-op-tit' }, p.titulo, el('small', {}, `${p.cantidad} u. · pagás hasta ${plata(p.precioMax)} c/u`)),
+        el('span', { class:'c-op-total' }, `${ofertas.length} oferta${ofertas.length === 1 ? '' : 's'}`,
+          el('small', {}, sinLeer ? `${sinLeer} nueva${sinLeer > 1 ? 's' : ''}` : abierto ? `cierra en ${diasQueFaltan(p)} días` : ''))),
+      el('div', { class:'c-op-cuerpo' },
+        est === 'adjudicada' ? el('div', { class:'notice notice-ok', style:{ marginBottom:'10px' } },
+          el('b', {}, 'Aceptaste una oferta. '), `Tu pedido de compra es ${p.ordenId}: seguilo en Mis compras.`,
+          el('div', { style:{ marginTop:'8px' } }, el('button', { class:'btn btn-sm', onclick:() => ir('#/compras') }, 'Ver en Mis compras'))) : null,
+        est === 'vencida' ? el('div', { class:'notice', style:{ marginBottom:'10px' } }, 'Pasó la fecha sin que aceptaras una oferta. Si todavía lo buscás, publicalo de nuevo.') : null,
+        ofertas.length
+          ? ofertas.map(o => filaOferta({ ...o, proveedor:o.proveedor + (p.ofertaAceptada === o.id ? ' (aceptada)' : '')
+                + (o.cantidad < p.cantidad ? ` · consigue ${o.cantidad} de ${p.cantidad}` : '') }, false, p.precioMax,
+              abierto ? el('button', { class:'btn btn-sm btn-win', onclick:() => confirmarAceptar(p, o) }, 'Aceptar') : null))
+          : el('p', { class:'c-sub' }, abierto ? 'Todavía no hay ofertas. Te avisamos cuando llegue la primera.' : 'No recibió ofertas.'),
+        abierto ? el('button', { class:'p-link', style:{ marginTop:'10px' }, onclick:() => confirmarCerrar(p) }, 'Ya no lo busco: cerrar este pedido') : null));
+  }
+
+  function confirmarAceptar(p, o){
+    const cant = Math.min(p.cantidad, o.cantidad);
+    const boton = el('button', { class:'btn btn-lg btn-win btn-block', onclick:async () => {
+      boton.disabled = true;
+      try{
+        const r = await aceptarOferta(p.id, o.id);
+        h.cerrar();
+        toast(`Listo: se creó tu pedido ${r.orden?.id || ''}`, 'win');
+        window.dispatchEvent(new Event('niju:avisos'));
+        ir('#/compras');
+      }catch(e){
+        boton.disabled = false;
+        toast(e.message, 'bad');
+        if (/Complet[aá] tus datos/i.test(e.message)){ h.cerrar(); ir('#/cuenta'); }
+      }
+    } }, `Aceptar y crear el pedido por ${plata(o.precio * cant)}`);
+    const h = hoja({ titulo:'Aceptar esta oferta', ancho:480, cuerpo:el('div', { class:'col' },
+      el('p', {}, el('b', {}, o.proveedor), ` te lo consigue a ${plata(o.precio)} por unidad${o.plazoDias ? `, en ${o.plazoDias} días` : ''}.`),
+      cant < p.cantidad ? el('div', { class:'notice' }, `Ojo: consigue ${cant} de las ${p.cantidad} unidades que pediste.`) : null,
+      el('div', { class:'notice' }, 'Se crea un pedido de compra en Mis compras, pendiente de pago. NiJu te contacta para coordinar el pago y la entrega. Las otras ofertas quedan descartadas.'),
+      boton,
+      el('button', { class:'btn btn-block', onclick:() => h.cerrar() }, 'Todavía no'))});
+  }
+
+  function confirmarCerrar(p){
+    const h = hoja({ titulo:'Cerrar el pedido', ancho:420, cuerpo:el('div', { class:'col' },
+      el('p', {}, `"${p.titulo}" deja de recibir ofertas.`),
+      el('button', { class:'btn btn-win btn-block', onclick:async () => {
+        try{ await cerrarPedido(p.id); h.cerrar(); toast('Pedido cerrado'); pintar(); }
+        catch(e){ toast(e.message, 'bad'); }
+      } }, 'Sí, cerrarlo'),
+      el('button', { class:'btn btn-block', onclick:() => h.cerrar() }, 'Cancelar')) });
   }
 
   pintar();
-  sincronizarDemanda().then(pintar);
-  raiz.append(cuerpo);
-  return raiz;
+  const reloj = setInterval(() => {
+    if (!cont.isConnected) return clearInterval(reloj);
+    if (!document.hidden) pintar();
+  }, REFRESCO_MS);
+  return cont;
 }
 
-function tarjeta(b, refrescar){
-  const usuario = store.get('usuario');
-  const sim = usuario ? simularLlenado(b, Math.round(b.precioMaxMinimo * 0.55)) : null;
-
-  return el('div', { class:'card', style:{ borderLeft:`4px solid ${b.llenable ? 'var(--win)' : 'var(--accion)'}` } },
-    el('div', { class:'row', style:{ gap:'14px', alignItems:'flex-start' } },
-      foto({ imagen:b.imagen, titulo:b.titulo }, '', ),
-      el('div', { class:'spacer' },
-        el('div', { class:'row', style:{ gap:'7px', marginBottom:'4px' } },
-          el('span', { class:'tag tag-nac' }, `${b.personas} persona${b.personas > 1 ? 's' : ''}`),
-          b.llenable ? el('span', { class:'tag tag-win' }, 'Hay quien la llena') : null,
-          b.diasRestantes <= 2 ? el('span', { class:'tag tag-warn' }, 'Cierra pronto') : null),
-        el('h3', {}, b.titulo),
-        el('div', { class:'tiny dim', style:{ marginTop:'4px' } },
-          `${num(b.unidades)} unidades · cierra en ${b.diasRestantes} días · seña puesta ${plata(b.senas)}`)),
-      el('div', { style:{ textAlign:'right', flex:'0 0 auto' } },
-        el('div', { class:'kicker' }, 'Pagan hasta'),
-        el('div', { class:'price price-lg' }, plata(b.precioMaxPromedio)),
-        el('div', { class:'tiny dim' }, 'comprometido ' + plata(b.comprometido)))),
-
-    b.ofertas.length
-      ? el('div', { style:{ marginTop:'12px' } },
-          el('div', { class:'kicker', style:{ marginBottom:'6px' } }, `${b.ofertas.length} oferta${b.ofertas.length > 1 ? 's' : ''} recibida${b.ofertas.length > 1 ? 's' : ''}`),
-          ...b.ofertas.slice(0, 4).map((o, i) => el('div', { class:'row-b tiny', style:{
-            padding:'6px 9px', borderRadius:'var(--r)', background: i === 0 ? 'var(--accion-suave)' : 'transparent' } },
-            el('span', {}, (i === 0 ? '🏆 ' : '') + o.proveedor + (o.plazoDias ? ` · ${o.plazoDias} días` : '')),
-            el('b', { class:'mono', style:{ color: o.precio <= b.precioMaxMinimo ? 'var(--win-tx)' : 'var(--bad)' } }, plata(o.precio)))))
-      : el('div', { class:'notice', style:{ marginTop:'12px' } },
-          'Nadie ofertó todavía. Esto es exactamente lo que le falta al mercado: hay ' + plata(b.comprometido) + ' esperando y nadie lo está sirviendo.'),
-
-    el('div', { class:'row wrapf', style:{ marginTop:'12px' } },
-      el('button', { class:'btn btn-sm btn-win', onclick:() => formPublicar(refrescar, b.titulo) }, 'Sumarme a este pedido'),
-      el('button', { class:'btn btn-sm', onclick:() => formOfertar(b, refrescar) }, 'Yo lo consigo')),
-
-    sim ? el('details', { style:{ marginTop:'10px' } },
-      el('summary', { class:'tiny dim', style:{ cursor:'pointer' } }, 'Si la llenás vos (solo lo ves vos)'),
-      el('div', { style:{ paddingTop:'8px' } },
-        fila('Unidades', String(sim.unidades)),
-        fila('Precio que tenés que respetar', plata(sim.precio)),
-        fila('Ingreso', plata(sim.ingreso)),
-        fila('Margen estimado', plata(sim.margen) + ` (${sim.margenPct}%)`),
-        fila('Capital propio necesario', plata(sim.capitalPropio)),
-        el('div', { class:'notice notice-ok', style:{ marginTop:'8px' } },
-          `Los clientes ya financian el ${sim.financiadoPorClientes}% de la compra con sus señas. Vendés antes de comprar.`))) : null);
+/* ---------- Una oferta, con foto y estado si la tiene ---------- */
+function filaOferta(o, mejor, precioMax, accion = null){
+  const detalle = [TIPOS_OFERTA[o.tipo] || TIPOS_OFERTA.proveedor, ESTADOS_PRODUCTO[o.estadoProducto],
+    o.plazoDias ? `entrega en ${o.plazoDias} días` : null, o.condicion || o.notas || null].filter(Boolean).join(' · ');
+  return el('div', { class:'d-oferta' + (mejor ? ' mejor' : '') },
+    o.foto ? el('a', { href:fotoUrl(o.id), target:'_blank', rel:'noopener', class:'d-oferta-foto', title:'Ver la foto' },
+      el('img', { src:fotoUrl(o.id), alt:'Foto del producto ofertado', loading:'lazy' })) : null,
+    el('span', { class:'d-oferta-txt' }, el('b', {}, (mejor ? 'Mejor oferta: ' : '') + o.proveedor), el('small', {}, detalle)),
+    el('span', { class:'d-oferta-precio' },
+      el('b', { class:'mono', style:{ color:precioMax == null || o.precio <= precioMax ? 'var(--win-tx)' : 'var(--bad)' } }, plata(o.precio)),
+      accion));
 }
 
-function formPublicar(refrescar, tituloPrevio = ''){
-  const d = { titulo:tituloPrevio, cantidad:1, dias:12 };
-  const campo = (label, key, tipo = 'text', ph) => el('div', { class:'field' },
+/* ---------- Mis ofertas como vendedor (Mi cuenta) ---------- */
+export function tarjetaMisOfertas(ir){
+  const TEXTO = { abierta:'Esperando que decidan', aceptada:'¡La aceptaron! NiJu te contacta para el envío y el cobro',
+                  otra:'Eligieron otra oferta', cerrada:'El pedido se cerró', vencida:'El pedido venció' };
+  const cabeza = () => el('div', { class:'c-card-head' }, el('h2', {}, 'Mis ofertas como vendedor'));
+  const cont = el('section', { class:'c-card', style:{ marginTop:'14px' } }, cabeza(), el('p', { class:'c-sub' }, 'Cargando tus ofertas…'));
+  async function pintar(){
+    let lista;
+    try{ lista = await misOfertas(); }
+    catch(e){ cont.replaceChildren(cabeza(), el('div', { class:'notice notice-bad' }, 'No pudimos leer tus ofertas: ' + e.message)); return; }
+    if (!lista.length){
+      cont.replaceChildren(cabeza(),
+        el('p', { class:'c-sub' }, '¿Tenés algo que otros buscan, o sabés dónde está más barato? Ofertá en "Pedí y que compitan" y ganá con la diferencia.'),
+        el('button', { class:'btn btn-sm', onclick:() => ir('#/demanda') }, 'Ver pedidos abiertos', ic('der')));
+      return;
+    }
+    cont.replaceChildren(cabeza(),
+      el('div', { class:'c-ops' }, ...lista.map(o => el('div', { class:'c-op-linea' },
+        el('span', {}, o.titulo, el('small', {}, `${TEXTO[o.estado] || o.estado} · ${o.cantidad} u. a ${plata(o.precio)}${o.ordenId ? ` · pedido ${o.ordenId}` : ''}`)),
+        el('b', {}, plata(Math.round(o.precio * o.cantidad * (1 - (o.comisionPct || 0)))))))),
+      el('p', { class:'c-legal' }, 'El monto es lo que cobrás si te compran todo, ya descontada la comisión de NiJu. A eso restale lo que te cuesta conseguirlo y enviarlo.'));
+  }
+  pintar();
+  const reloj = setInterval(() => {
+    if (!cont.isConnected) return clearInterval(reloj);
+    if (!document.hidden) pintar();
+  }, 60 * 1000);
+  return cont;
+}
+
+/* ---------- Formularios ---------- */
+function formPublicar(alPublicar, tituloPrevio = ''){
+  const d = { titulo:tituloPrevio, cantidad:1, dias:DIAS_DEFECTO };
+  const campo = (label, key, tipo = 'text', ph = '') => el('div', { class:'field' },
     el('label', {}, label),
-    el('input', { class:'inp', type:tipo, placeholder:ph || '', value:d[key] ?? '',
-      oninput:e => d[key] = tipo === 'number' ? (+e.target.value || 0) : e.target.value }));
+    el('input', { class:'inp', type:tipo, placeholder:ph, value:d[key] ?? '', min:tipo === 'number' ? '1' : null,
+      oninput:e => { d[key] = tipo === 'number' ? (+e.target.value || 0) : e.target.value; actualizar(); } }));
 
   const resumen = el('div');
-  const actualizar = () => {
-    const sena = Math.round((d.precioMax || 0) * (d.cantidad || 1) * SENA_DEMANDA);
+  function actualizar(){
     resumen.replaceChildren(
-      fila('Total si te lo consiguen', plata((d.precioMax || 0) * (d.cantidad || 1))),
-      el('div', { class:'cost-line total' },
-        el('span', {}, `Seña que dejás ahora (${Math.round(SENA_DEMANDA*100)}%)`), el('b', {}, plata(sena))),
+      el('div', { class:'cost-line total' }, el('span', {}, 'Total si te lo consiguen a tu precio'), el('b', {}, plata((d.precioMax || 0) * (d.cantidad || 1)))),
       el('div', { class:'notice notice-ok', style:{ marginTop:'8px' } },
-        'Si nadie lo consigue a tu precio antes del cierre, te devolvemos la seña completa. Y si lo consiguen más barato, pagás menos.'));
-  };
+        'Publicar no cuesta nada. Pagás recién si aceptás una oferta, y si te lo consiguen más barato, pagás menos.'));
+  }
   actualizar();
 
-  const { cerrar } = hoja({ titulo:'Publicá lo que estás buscando', ancho:560, cuerpo: el('div', { class:'col' },
-    campo('¿Qué estás buscando?', 'titulo', 'text', 'Ej: prensa de tazas 11oz'),
+  const boton = el('button', { class:'btn btn-lg btn-win btn-block', onclick:async () => {
+    if (!d.titulo?.trim()) return toast('Decinos qué buscás', 'bad');
+    if (!(d.precioMax > 0)) return toast('Poné hasta cuánto pagás por unidad', 'bad');
+    boton.disabled = true;
+    try{
+      await publicar(d);
+      toast('Tu pedido está publicado. Lo seguís en Mi cuenta.', 'win');
+      h.cerrar();
+      alPublicar();
+    }catch(e){ boton.disabled = false; toast(e.message, 'bad'); }
+  } }, 'Publicar mi pedido');
+
+  const h = hoja({ titulo:'Publicá lo que buscás', ancho:560, cuerpo:el('div', { class:'col' },
+    campo('¿Qué buscás?', 'titulo', 'text', 'Ej: prensa para tazas de 11 oz'),
     el('div', { class:'field' }, el('label', {}, 'Detalles que importan'),
-      el('textarea', { class:'inp', placeholder:'Marca, medida, color, si aceptás usado…',
-        oninput:e => d.detalle = e.target.value })),
-    el('div', { class:'grid g-2' },
-      (() => { const c = campo('Pago hasta (por unidad)', 'precioMax', 'number'); c.querySelector('input').addEventListener('input', actualizar); return c; })(),
-      (() => { const c = campo('Cantidad', 'cantidad', 'number'); c.querySelector('input').addEventListener('input', actualizar); return c; })()),
+      el('textarea', { class:'inp', placeholder:'Marca, medida, color, si aceptás usado…', oninput:e => d.detalle = e.target.value })),
+    el('div', { class:'grid g-2' }, campo('Pago hasta (por unidad, en pesos)', 'precioMax', 'number'), campo('Cantidad', 'cantidad', 'number')),
     el('div', { class:'grid g-2' },
       el('div', { class:'field' }, el('label', {}, 'Rubro'),
         el('select', { class:'inp', onchange:e => d.rubro = e.target.value },
           el('option', { value:'' }, 'Elegí uno'), ...RUBROS.map(r => el('option', { value:r.id }, r.nombre)))),
-      campo('Días que esperás', 'dias', 'number')),
-    campo('Tu nombre', 'autor', 'text', store.get('usuario')?.nombre || ''),
-    resumen,
-    el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => {
-      if (!d.titulo?.trim()) return toast('Decinos qué buscás', 'bad');
-      if (!d.precioMax) return toast('Poné hasta cuánto pagás', 'bad');
-      publicar({ ...d, autor:d.autor || store.get('usuario')?.nombre || 'Anónimo',
-                 email:store.get('usuario')?.email })
-        .then(() => { toast('Tu demanda está publicada. Ahora que compitan.', 'win'); cerrar(); refrescar(); });
-    } }, 'Publicar mi demanda')) });
+      campo('Días que esperás ofertas', 'dias', 'number')),
+    resumen, boton) });
 }
 
-function formOfertar(b, refrescar){
-  const d = { cantidad:b.unidades };
+/* particular:true = un cliente que no es proveedor aprobado: foto real,
+   estado del producto, compromiso de envío y comisión de NiJu. */
+function formOfertar(b, refrescar, particular = false){
+  const d = { cantidad:b.unidades, estadoProducto:particular ? '' : 'nuevo', compromisoEnvio:false, foto:null };
   const campo = (label, key, tipo = 'text') => el('div', { class:'field' },
     el('label', {}, label),
-    el('input', { class:'inp', type:tipo, value:d[key] ?? '',
-      oninput:e => d[key] = tipo === 'number' ? (+e.target.value || 0) : e.target.value }));
+    el('input', { class:'inp', type:tipo, value:d[key] ?? '', min:tipo === 'number' ? '0' : null,
+      oninput:e => { d[key] = tipo === 'number' ? (+e.target.value || 0) : e.target.value; cuenta(); } }));
 
-  const { cerrar } = hoja({ titulo:'Ofertar por esta orden', cuerpo: el('div', { class:'col' },
+  const ganancia = el('div');
+  function cuenta(){
+    if (!particular){ ganancia.replaceChildren(''); return; }
+    const cant = Math.min(d.cantidad || 0, b.unidades);
+    const venta = (d.precio || 0) * cant;
+    const comision = Math.round(venta * COMISION_PARTICULAR);
+    ganancia.replaceChildren(
+      fila(`Vendés ${cant} u. a ${plata(d.precio || 0)}`, plata(venta)),
+      fila(`Comisión de NiJu (${Math.round(COMISION_PARTICULAR * 100)}%)`, '− ' + plata(comision)),
+      el('div', { class:'cost-line total' }, el('span', {}, 'Cobrás si aceptan todos'), el('b', {}, plata(venta - comision))),
+      el('p', { class:'tiny dim', style:{ margin:'6px 0 0' } }, 'Tu ganancia es eso menos lo que te cuesta conseguirlo y enviarlo.'));
+  }
+  cuenta();
+
+  const previa = el('div', { class:'d-foto-previa' });
+  const inputFoto = el('input', { type:'file', accept:'image/*', class:'inp', onchange:async e => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    previa.replaceChildren('Preparando la foto…');
+    try{ d.foto = await reducirFoto(f); previa.replaceChildren(el('img', { src:d.foto, alt:'Foto que vas a subir' })); }
+    catch(err){ d.foto = null; previa.replaceChildren(''); toast(err.message, 'bad'); }
+  } });
+
+  const boton = el('button', { class:'btn btn-lg btn-win btn-block', onclick:async () => {
+    if (!(d.precio > 0)) return toast('Poné tu precio por unidad', 'bad');
+    if (particular){
+      if (!d.foto) return toast('Subí una foto real del producto', 'bad');
+      if (!d.estadoProducto) return toast('Decinos si es nuevo, usado o reacondicionado', 'bad');
+      if (!d.compromisoEnvio) return toast('Tenés que comprometerte a enviarlo a cada comprador', 'bad');
+    }
+    boton.disabled = true;
+    try{
+      const r = await ofertar(b, d);
+      toast(`Oferta enviada a ${r.ofertados} persona${r.ofertados > 1 ? 's' : ''}`, 'win');
+      h.cerrar(); refrescar();
+    }catch(e){ boton.disabled = false; toast(e.message, 'bad'); }
+  } }, 'Enviar mi oferta');
+
+  const h = hoja({ titulo:particular ? 'Yo lo consigo' : 'Ofertar por este pedido', ancho:560, cuerpo:el('div', { class:'col' },
     el('div', { class:'notice' },
-      `Hay ${num(b.unidades)} unidades pedidas y ${plata(b.senas)} de señas ya puestas. Para llevarte la orden entera tu precio tiene que ser ${plata(b.precioMaxMinimo)} o menos.`),
-    campo('Quién sos / tu comercio', 'proveedor'),
-    campo('Precio por unidad', 'precio', 'number'),
-    campo('Cuántas podés entregar', 'cantidad', 'number'),
-    campo('En cuántos días', 'plazoDias', 'number'),
-    el('div', { class:'field' }, el('label', {}, 'Notas'),
-      el('textarea', { class:'inp', oninput:e => d.notas = e.target.value })),
-    el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => {
-      if (!d.proveedor || !d.precio) return toast('Falta tu nombre o el precio', 'bad');
-      ofertar(b.ordenes[0].id, d).then(() => {
-        toast('Oferta enviada', 'win'); cerrar(); refrescar();
-      });
-    } }, 'Enviar mi oferta')) });
+      `Piden ${num(b.unidades)} unidades entre ${b.personas} persona${b.personas > 1 ? 's' : ''}. Para que tu oferta le sirva a todos, tiene que ser de ${plata(b.precioMaxMinimo)} por unidad o menos. Cada persona decide si la acepta.`),
+    particular ? el('div', { class:'field' }, el('label', {}, 'Foto real del producto (obligatoria)'), inputFoto,
+      el('small', { class:'tiny dim' }, 'Sacala vos, del producto que vas a mandar: nada de fotos de internet.'), previa) : null,
+    el('div', { class:'grid g-2' },
+      el('div', { class:'field' }, el('label', {}, 'Estado del producto'),
+        el('select', { class:'inp', onchange:e => d.estadoProducto = e.target.value },
+          particular ? el('option', { value:'' }, 'Elegí') : null,
+          ...Object.entries(ESTADOS_PRODUCTO).map(([v, t]) => el('option', { value:v, selected:d.estadoProducto === v || null }, t)))),
+      campo('Precio por unidad, en pesos', 'precio', 'number')),
+    el('div', { class:'grid g-2' }, campo('Cuántas podés entregar', 'cantidad', 'number'), campo('En cuántos días', 'plazoDias', 'number')),
+    el('div', { class:'field' }, el('label', {}, particular ? 'Cómo está (marcas de uso, caja, garantía, qué incluye)' : 'Notas (garantía, condiciones)'),
+      el('textarea', { class:'inp', oninput:e => { d.condicion = e.target.value; d.notas = e.target.value; } })),
+    particular ? el('label', { class:'switch' },
+      el('input', { type:'checkbox', onchange:e => d.compromisoEnvio = e.target.checked }),
+      el('span', { class:'tiny' }, 'Me comprometo a que el producto es el de la foto, en el estado que declaro, y a enviarlo a cada comprador que acepte mi oferta.')) : null,
+    ganancia,
+    particular ? el('p', { class:'tiny dim' }, 'Si vendés seguido, tenés que estar inscripto ante ARCA (por ejemplo, en el Monotributo). NiJu factura su comisión.') : null,
+    boton) });
 }
 
-const paso = (n, t, d) => el('div', { class:'card' },
-  el('div', { class:'row', style:{ marginBottom:'6px' } }, el('span', { class:'step-n' }, n), el('b', {}, t)),
-  el('p', { class:'tiny muted' }, d));
-const kpi = (t, v, d, col) => el('div', { class:'kpi' },
-  el('div', { class:'kicker' }, t), el('b', { style:{ color:col || '' } }, v), d ? el('div', { class:'d dim' }, d) : null);
-const fila = (k, v) => el('div', { class:'cost-line' },
-  el('span', { class:'lbl' }, k), el('span', { class:'mono' }, v));
+function formProveedor(alEntrar){
+  const input = el('input', { class:'inp', placeholder:'P-XXXXXXXXXX', autocomplete:'off' });
+  const boton = el('button', { class:'btn btn-win btn-block', onclick:async () => {
+    if (!input.value.trim()) return toast('Pegá tu código', 'bad');
+    boton.disabled = true;
+    try{
+      const nombre = await entrarComoProveedor(input.value);
+      toast(`Listo, ofertás como ${nombre}`, 'win');
+      h.cerrar(); alEntrar();
+    }catch(e){ boton.disabled = false; toast(e.message, 'bad'); }
+  } }, 'Entrar como proveedor');
+  const h = hoja({ titulo:'Soy proveedor', ancho:440, cuerpo:el('div', { class:'col' },
+    el('p', { class:'muted' }, 'NiJu da de alta a cada proveedor y le pasa un código. Con ese código podés ofertar en los pedidos abiertos desde este dispositivo.'),
+    el('div', { class:'field' }, el('label', {}, 'Tu código'), input),
+    boton,
+    el('p', { class:'tiny dim' }, 'Si todavía no tenés código, escribinos por Mensajes contando qué vendés.')) });
+}
+
+/* ---------- Panel → Proveedores ---------- */
+export function vistaProveedores(){
+  const cont = el('div', { class:'section' }, el('div', { class:'card v-sk', style:{ minHeight:'120px' } }));
+  async function pintar(){
+    let lista;
+    try{ lista = await listarProveedores(); }
+    catch(e){ cont.replaceChildren(el('div', { class:'notice notice-bad' }, 'No pudimos leer los proveedores: ' + e.message)); return; }
+    const d = {};
+    const campo = (label, key, ph) => el('div', { class:'field' }, el('label', {}, label),
+      el('input', { class:'inp', placeholder:ph, oninput:e => d[key] = e.target.value }));
+    const boton = el('button', { class:'btn btn-win', onclick:async () => {
+      if (!d.nombre?.trim()) return toast('Poné el nombre del proveedor', 'bad');
+      boton.disabled = true;
+      try{
+        const r = await crearProveedor(d);
+        const copiar = el('button', { class:'btn btn-block', onclick:() => navigator.clipboard?.writeText(r.codigo).then(() => toast('Código copiado', 'win')) }, 'Copiar código');
+        const hh = hoja({ titulo:`Código de ${r.proveedor.nombre}`, ancho:420, cuerpo:el('div', { class:'col' },
+          el('p', {}, 'Pasale este código al proveedor. Lo ingresa en "Pedí y que compitan" → "Ingresá tu código de proveedor".'),
+          el('div', { class:'mono center', style:{ fontSize:'24px', fontWeight:'700', padding:'14px', background:'var(--surface-2)', borderRadius:'var(--r)' } }, r.codigo),
+          el('div', { class:'notice notice-bad' }, 'Se muestra una sola vez: no queda guardado en ningún lado. Si se pierde, dalo de baja y creá otro.'),
+          copiar, el('button', { class:'btn btn-win btn-block', onclick:() => hh.cerrar() }, 'Ya lo guardé')) });
+        pintar();
+      }catch(e){ boton.disabled = false; toast(e.message, 'bad'); }
+    } }, 'Dar de alta');
+
+    cont.replaceChildren(
+      el('p', { class:'muted', style:{ marginBottom:'12px' } },
+        'Solo los proveedores de esta lista pueden ofertar en "Pedí y que compitan". Al darlos de alta se genera un código que se muestra una sola vez.'),
+      el('div', { class:'card', style:{ marginBottom:'14px' } },
+        el('div', { class:'grid g-2' }, campo('Nombre del proveedor', 'nombre', 'Ej: Importadora del Sur'), campo('Contacto', 'contacto', 'Teléfono o email')),
+        boton),
+      lista.length
+        ? el('div', { class:'col' }, ...lista.map(p => el('div', { class:'card row-b' },
+            el('div', {}, el('b', {}, p.nombre), el('div', { class:'tiny dim' }, `${p.contacto || 'sin contacto'} · alta ${fecha(p.creado)}`)),
+            p.activo
+              ? el('button', { class:'btn btn-sm', onclick:async () => { try{ await bajaProveedor(p.id); toast('Proveedor dado de baja'); pintar(); }catch(e){ toast(e.message, 'bad'); } } }, 'Dar de baja')
+              : el('span', { class:'tag' }, 'Dado de baja'))))
+        : el('p', { class:'muted' }, 'Todavía no hay proveedores aprobados.'));
+  }
+  pintar();
+  return cont;
+}
+
+const fila = (k, v) => el('div', { class:'cost-line' }, el('span', { class:'lbl' }, k), el('span', { class:'mono' }, v));

@@ -13,6 +13,7 @@ import { CONFIG } from '../config.js';
 import { RUBROS } from '../data/catalog.js';
 import { STORE_BY_ID } from '../data/stores.js';
 import { mejorRegimen } from '../engine/taxes.js';
+import { panelImportacion } from './desglose.js';
 import { calcularFee, TARIFARIO } from '../engine/fees.js';
 import { comprobanteGestion, ALICUOTAS } from '../engine/facturacion.js';
 import { aPesos, aUSD, FX } from '../engine/fx.js';
@@ -39,6 +40,7 @@ export function vistaPedido(ir){
   const cuerpo = el('div');
 
   let datos = null;          // lo que devolvió el resolver
+  let panel = null;          // panel de importación del producto actual
   const form = { pesoKg:1, unidades:1, destino:'uso', rubro:'tecnologia' };
 
   /* ---------- Entrada ---------- */
@@ -54,7 +56,7 @@ export function vistaPedido(ir){
     if (!/^https?:\/\//i.test(u)) return toast('El link tiene que empezar con http:// o https://', 'bad');
 
     estado.replaceChildren(cargandoNiju('Leyendo el producto en la tienda…'));
-    manualBox.replaceChildren(); cotizBox.replaceChildren();
+    manualBox.replaceChildren(); cotizBox.replaceChildren(); panel = null;
     estado.scrollIntoView({ behavior:'smooth', block:'start' });
 
     try{
@@ -131,6 +133,9 @@ export function vistaPedido(ir){
       el('input', { class:'inp', value:form[clave] ?? '', oninput:e => { form[clave] = e.target.value; pintarCotizador(); } }),
       ayuda ? el('small', {}, ayuda) : null);
 
+    /* Del exterior: el panel de importación tiene sus propios campos. */
+    if ((form.tienda.tipo || 'internacional') !== 'nacional'){ manualBox.replaceChildren(''); pintarCotizador(); return; }
+
     manualBox.replaceChildren(el('section', { class:'t-manual' },
       el('h2', {}, 'Contanos qué querés que traigamos'),
       el('div', { class:'grid g-2' },
@@ -147,6 +152,21 @@ export function vistaPedido(ir){
   /* ---------- Cotización ---------- */
   function pintarCotizador(){
     const internacional = (form.tienda?.tipo || 'internacional') !== 'nacional';
+    /* Del exterior: todo discriminado, etapa por etapa (ui/desglose.js).
+       El panel se arma una vez por producto; si cambia el precio, se actualiza. */
+    if (internacional){
+      const leido = datos?.ok && datos.titulo;
+      const clave = leido ? `${form.url}|${form.titulo}` : `${form.url}|manual`;
+      if (panel?.clave !== clave){
+        panel = panelImportacion({ ir, alConfirmar:pedirImportacion, producto: leido
+          ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url }
+          : null });
+        panel.clave = clave;
+      }
+      if (leido) panel.actualizarPrecio(form.precio, form.moneda);
+      if (cotizBox.firstChild !== panel) cotizBox.replaceChildren(panel);
+      return;
+    }
     const valorUSD = aUSD(form.precio || 0, form.moneda || 'USD') * (form.unidades || 1);
     const fleteUSD = internacional ? Math.max(9, (form.pesoKg || 1) * (form.unidades || 1) * 11) : 0;
 
@@ -215,6 +235,23 @@ export function vistaPedido(ir){
         el('div', { class:'tiny dim center' }, 'Sin cargo hasta que confirmes. Te mandamos la cotización final.'))));
   }
 
+  function pedirImportacion(res){
+    /* Pedido de cotización con el desglose completo. No va a la carpeta
+       fiscal como compra: aparece en "Tus cotizaciones de importación". */
+    store.push('pedidos', {
+      id:'pd-' + uid(), creado:Date.now(), estado:'cotizado',
+      titulo:res.titulo || form.titulo, imagen:form.imagen, url:form.url,
+      tienda:form.tienda?.nombre || 'Tienda externa', precio:form.precio, moneda:form.moneda,
+      unidades:res.unidades, pesoKg:res.pesoKg, destino:res.destino,
+      totalARS:res.totalARS, regimen:res.via, desglose:res
+    });
+    toast('¡Pedido creado! Te mandamos la cotización final', 'win');
+    link.value = ''; panel = null;
+    estado.replaceChildren(); manualBox.replaceChildren(); cotizBox.replaceChildren();
+    pintar();
+    document.querySelector('.t-mis-pedidos')?.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
   function confirmar(totalARS, imp, fee, comp){
     /* Es un pedido de cotización, no una compra: no va a la carpeta fiscal
        (la carpeta solo cuenta compras pagadas). */
@@ -244,7 +281,8 @@ export function vistaPedido(ir){
         el('div', { class:'spacer', style:{ minWidth:'0' } },
           el('b', {}, x.titulo || 'Pedido'),
           el('div', { class:'tiny dim' }, `${x.tienda} · ${x.unidades} u. · ${fecha(x.creado)}`),
-          x.url ? el('a', { href:x.url, target:'_blank', rel:'noopener', class:'tiny' }, 'Ver en la tienda original ↗') : null),
+          x.url ? el('a', { href:x.url, target:'_blank', rel:'noopener', class:'tiny' }, 'Ver en la tienda original ↗') : null,
+          x.desglose ? el('button', { class:'p-link tiny', onclick:() => ir('#/impuestos?tab=carpeta') }, 'Ver el desglose completo') : null),
         el('div', { style:{ textAlign:'right' } },
           el('span', { class:'k-estado warn' }, x.estado === 'cotizado' ? 'Cotizando' : x.estado),
           el('div', { class:'price price-lg', style:{ marginTop:'4px' } }, plata(x.totalARS)))))));

@@ -20,6 +20,7 @@ import { descargarResumenPDF } from './resumen-pdf.js';
 import { botonVolver } from './components.js';
 import { abrirTerminos } from './info.js';
 import { progreso, leerPromosPublicas, miBeneficio } from '../engine/promos.js';
+import { tarjetaMisPedidos, tarjetaMisOfertas } from './demanda.js';
 
 const avisoLocal = () => el('div', { class:'notice notice-bad', style:{ marginBottom:'12px' } },
   el('b', {}, 'Sin base de datos todavía. '),
@@ -71,7 +72,7 @@ export function vistaCuenta(ir){
       kpis,
       el('div', { class:'c-grid' },
         tarjetaDatos(u, perfil, () => editar(u, m, pintar)),
-        el('div', { class:'c-col' }, fidelidad, situacion, tarjetaAvisos(u, m, pintar))));
+        el('div', { class:'c-col' }, fidelidad, situacion, m === 'nube' ? tarjetaMisPedidos(ir) : '', m === 'nube' ? tarjetaMisOfertas(ir) : '', tarjetaAvisos(u, m, pintar))));
 
     const anio = new Date().getFullYear();
     try{
@@ -330,6 +331,31 @@ export function formPerfil({ perfil = {}, modo = 'editar', conClave = false, ema
   const selector = (label, ruta, opciones, ayuda) =>
     envolver(ruta, label, el('select', { class:'inp', onchange:e => set(ruta, e.target.value) },
       ...opciones.map(([v, t]) => el('option', { value:v, selected:(get(ruta) ?? '') === v || null }, t))), ayuda);
+  /* Fecha en tres listas: día, mes y año. El <input type="date"> en el iPad
+     mostraba solo mes y año y no dejaba elegir el día. Se guarda igual que
+     antes (AAAA-MM-DD), así la validación de mayor de 18 no cambia. */
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const fecha = (label, ruta, ayuda) => {
+    const [a0, m0, d0] = String(get(ruta) || '').split('-');
+    const v = { d:d0 ? +d0 : '', m:m0 ? +m0 : '', a:a0 ? +a0 : '' };
+    const anio = new Date().getFullYear();
+    const lista = (nombre, opciones, clave, auto) => el('select', { class:'inp', 'aria-label':nombre, autocomplete:auto,
+      onchange:e => { v[clave] = e.target.value ? +e.target.value : ''; guardar(); } },
+      el('option', { value:'' }, nombre),
+      ...opciones.map(([valor, texto]) => el('option', { value:valor, selected:v[clave] === valor || null }, texto)));
+    const selDia = lista('Día', Array.from({ length:31 }, (_, i) => [i + 1, String(i + 1)]), 'd', 'bday-day');
+    const guardar = () => {
+      const maximo = v.m && v.a ? new Date(v.a, v.m, 0).getDate() : 31;     // 30 de febrero no existe
+      for (const o of selDia.options) if (o.value) o.disabled = +o.value > maximo;
+      if (v.d > maximo){ v.d = ''; selDia.value = ''; }
+      set(ruta, v.d && v.m && v.a ? `${v.a}-${String(v.m).padStart(2, '0')}-${String(v.d).padStart(2, '0')}` : '');
+    };
+    const control = el('div', { class:'fecha-sel', role:'group', 'aria-label':label, tabindex:'-1' },
+      selDia,
+      lista('Mes', MESES.map((n, i) => [i + 1, n]), 'm', 'bday-month'),
+      lista('Año', Array.from({ length:101 }, (_, i) => [anio - i, String(anio - i)]), 'a', 'bday-year'));
+    return envolver(ruta, label, control, ayuda);
+  };
   const credencial = (label, k, auto) => envolver(k, label,
     el('input', { class:'inp', type:'password', autocomplete:auto, oninput:e => cred[k] = e.target.value }));
   const titulo = t => el('div', { class:'kicker', style:{ margin:'16px 0 8px' } }, t);
@@ -374,7 +400,7 @@ export function formPerfil({ perfil = {}, modo = 'editar', conClave = false, ema
       campo('Nombre', 'nombre', { auto:'given-name' }),
       campo('Apellido', 'apellido', { auto:'family-name' }),
       campo('DNI', 'dni', { ph:'Sin puntos', auto:'off' }),
-      campo('Fecha de nacimiento', 'fechaNac', { tipo:'date', auto:'bday' }),
+      fecha('Fecha de nacimiento', 'fechaNac'),
       campo('Celular', 'telefono', { tipo:'tel', ph:'11 5555 5555', auto:'tel', ayuda:'Para coordinar la entrega.' })),
 
     titulo('Domicilio de entrega'),

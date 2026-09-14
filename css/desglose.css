@@ -1,0 +1,102 @@
+/* ============================================================
+   NiJu — Desglose de importación
+   Secciones blancas apiladas: tu situación, qué es para la
+   Aduana, las cinco etapas del viaje, el desglose línea por
+   línea, la comparación con el país y las preguntas.
+   ============================================================ */
+.dz{ display:flex; flex-direction:column; gap:14px; min-width:0; }
+.dz-sec{ background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:16px 18px; min-width:0; }
+.dz-sec > h2{ font-size:18px; margin:0 0 4px; display:flex; gap:8px; align-items:center; }
+.dz-sec > h2 .ic{ width:20px; height:20px; color:var(--accion); flex:none; }
+.dz-sub{ color:var(--tx-2); font-size:13.5px; margin:0 0 12px; line-height:1.45; }
+.dz-fila{ display:flex; flex-wrap:wrap; gap:10px 18px; align-items:flex-start; }
+.dz-fila > .k2-campo{ flex:1 1 220px; min-width:0; }
+
+/* ---- Posición NCM ---- */
+.dz-pos{ border:1px solid var(--line); border-radius:var(--r-lg); padding:12px 14px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 16px; align-items:start; }
+.dz-pos-cod{ font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-weight:700; font-size:15px; }
+.dz-pos-txt{ font-size:13.5px; color:var(--tx-2); line-height:1.4; grid-column:1; }
+.dz-pos-die{ grid-row:1 / span 2; grid-column:2; text-align:right; }
+.dz-pos-die b{ display:block; font-size:24px; color:var(--accion); line-height:1; }
+.dz-pos-die small{ font-size:11.5px; color:var(--tx-3); }
+.dz-lista{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.dz-opcion{ text-align:left; border:1px solid var(--line); border-radius:var(--r); padding:8px 10px; background:var(--surface);
+  cursor:pointer; font:inherit; color:inherit; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 12px; }
+.dz-opcion:hover, .dz-opcion.on{ border-color:var(--accion); box-shadow:0 0 0 1px var(--accion); }
+.dz-opcion small{ color:var(--tx-2); font-size:12.5px; line-height:1.35; }
+.dz-opcion b.mono{ grid-row:1 / span 2; grid-column:2; align-self:center; }
+.dz-buscar{ display:flex; gap:8px; margin-top:10px; }
+.dz-buscar .inp{ flex:1; min-width:0; }
+
+/* ---- Etapas ---- */
+.dz-etapas{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.dz-etapa{ display:grid; grid-template-columns:34px minmax(0,1fr); gap:12px; border:1px solid var(--line-soft); border-radius:var(--r-lg); padding:12px 14px; }
+.dz-n{ width:32px; height:32px; border-radius:50%; background:var(--accion-suave); color:var(--accion); display:grid; place-items:center; font-weight:700; }
+.dz-etapa h3{ margin:0 0 4px; font-size:15px; }
+.dz-etapa p{ margin:0 0 6px; font-size:13.5px; color:var(--tx-2); line-height:1.45; }
+.dz-etapa details{ font-size:13px; color:var(--tx-2); margin:4px 0; }
+.dz-etapa details summary{ cursor:pointer; color:var(--accion); font-weight:600; }
+.dz-etapa details ul{ margin:6px 0 0; padding-left:18px; }
+.dz-etapa details li{ margin-bottom:4px; }
+.dz-campos{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end; margin-top:8px; }
+.dz-campo{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--tx-2); flex:1 1 180px; min-width:0; }
+.dz-campo .inp{ font-size:15px; }
+.dz-tarifa{ font-size:13px; background:var(--surface-2); border-radius:var(--r); padding:8px 10px; margin-top:8px; line-height:1.45; }
+.dz-tarifa b{ color:var(--tx); }
+
+/* ---- Desglose ---- */
+.dz-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.dz-etapa-cab{ display:flex; justify-content:space-between; gap:8px; font-weight:700; font-size:12px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--tx-2); padding:14px 0 4px; border-bottom:1px solid var(--line); }
+.dz-linea summary{ display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:2px 14px; align-items:baseline;
+  padding:9px 0; cursor:pointer; list-style:none; border-bottom:1px solid var(--line-soft); }
+.dz-linea summary::-webkit-details-marker{ display:none; }
+.dz-linea[open] summary{ border-bottom-color:transparent; }
+.dz-linea-k{ font-weight:600; font-size:14px; min-width:0; }
+.dz-linea-f{ grid-column:1; font-size:12px; color:var(--tx-3); line-height:1.35; }
+.dz-usd, .dz-ars{ font-family:ui-monospace, SFMono-Regular, Menlo, monospace; text-align:right; font-size:13.5px; white-space:nowrap; }
+.dz-usd{ color:var(--tx-2); }
+.dz-ars{ font-weight:700; }
+.dz-linea.info .dz-linea-k{ font-weight:500; color:var(--tx-2); }
+.dz-linea-cuerpo{ padding:2px 0 12px; font-size:13.5px; color:var(--tx-2); line-height:1.5; border-bottom:1px solid var(--line-soft); }
+.dz-linea-cuerpo p{ margin:0 0 6px; }
+.dz-sello{ display:inline-block; font-size:10.5px; padding:1px 7px; border-radius:var(--r-pill); background:var(--surface-2);
+  color:var(--tx-2); margin-left:6px; font-weight:600; vertical-align:middle; white-space:nowrap; }
+.dz-sello.ok{ background:rgba(0,166,80,.12); color:var(--ok); }
+.dz-sello.warn{ background:rgba(245,166,35,.18); color:var(--tx); }
+.dz-sello.bad{ background:rgba(242,61,79,.12); color:var(--bad); }
+.dz-totales{ margin-top:14px; display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+.dz-total{ background:var(--surface-2); border-radius:var(--r); padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
+.dz-total small{ font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--tx-2); }
+.dz-total b{ font-size:20px; }
+.dz-total span{ font-size:12px; color:var(--tx-2); }
+.dz-total.grande{ background:var(--accion); color:var(--accion-tx); }
+.dz-total.grande small, .dz-total.grande span{ color:inherit; opacity:.9; }
+.dz-no{ border:1px solid var(--bad); background:rgba(242,61,79,.06); border-radius:var(--r-lg); padding:14px 16px; }
+.dz-no h3{ margin:0 0 6px; font-size:16px; color:var(--bad); }
+.dz-no ul{ margin:0 0 10px; padding-left:18px; }
+.dz-cambio{ font-size:12px; color:var(--tx-3); margin-top:8px; }
+
+/* ---- Comparación y consejo ---- */
+.dz-local{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; align-items:center; border:1px solid var(--line); border-radius:var(--r); padding:10px 12px; }
+.dz-local label{ grid-column:1 / -1; font-size:12.5px; display:flex; gap:6px; align-items:center; color:var(--tx-2); }
+.dz-consejo h3{ font-size:17px; margin:0 0 8px; }
+.dz-consejo ul{ margin:0 0 8px; padding-left:18px; line-height:1.5; }
+
+/* ---- Preguntas ---- */
+.dz-chat{ display:flex; flex-direction:column; gap:8px; max-height:380px; overflow:auto; margin-bottom:10px; }
+.dz-burbuja{ padding:8px 12px; border-radius:12px; max-width:88%; font-size:14px; line-height:1.45; white-space:pre-wrap; }
+.dz-burbuja.yo{ align-self:flex-end; background:var(--accion); color:var(--accion-tx); }
+.dz-burbuja.niju{ align-self:flex-start; background:var(--surface-2); }
+.dz-burbuja small{ display:block; font-size:11px; opacity:.7; margin-top:4px; }
+.msg.aviso{ background:var(--surface-2); color:var(--tx-2); font-style:italic; }
+
+@media (max-width:560px){
+  .dz-sec{ padding:14px; }
+  .dz-linea summary{ grid-template-columns:minmax(0,1fr) auto; }
+  .dz-usd{ display:none; }
+  .dz-etapa{ grid-template-columns:minmax(0,1fr); }
+  .dz-n{ display:none; }
+  .dz-pos{ grid-template-columns:minmax(0,1fr); }
+  .dz-pos-die{ grid-row:auto; grid-column:1; text-align:left; }
+}

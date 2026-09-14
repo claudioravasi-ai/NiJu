@@ -58,11 +58,11 @@ export function analizarCompra({ items = [], perfilId = 'consumidor_final', dest
     } else if (e.valorUSD > cr.topeValorUSD || e.pesoKg > cr.topePesoKg){
       noPodes.push({ t:`Traer lo de ${e.tienda} por courier`, d:`Vale ${valor} y pesa unos ${Math.round(e.pesoKg)} kg: pasa el límite de US$ ${cr.topeValorUSD} o ${cr.topePesoKg} kg por envío. Se hace como compra grande, con despachante.`, grande:true, fuente:'envios' });
     } else if (e.iguales > cr.unidadesPorItem){
-      conviene.push({ t:`Ojo con las unidades iguales de ${e.tienda}`, d:`Más de ${cr.unidadesPorItem} unidades del mismo producto se toman como compra comercial. Si es para vender, pasalo a compra grande.`, grande:true, fuente:'envios' });
+      noPodes.push({ t:`Traer lo de ${e.tienda} por courier`, d:`Son más de ${cr.unidadesPorItem} unidades del mismo producto, y el pequeño envío admite hasta ${cr.unidadesPorItem}. Va como compra grande, con despachante.`, grande:true, fuente:'envios' });
     } else if (e.valorUSD <= cr.franquiciaUSD){
-      podes.push({ t:`Traer lo de ${e.tienda} dentro de la franquicia`, d:`Vale ${valor}: entra en los US$ ${cr.franquiciaUSD} por envío que no pagan derechos, según los valores que usa la app.`, fuente:'envios' });
+      podes.push({ t:`Traer lo de ${e.tienda} dentro de la franquicia`, d:`Vale ${valor}: entra en los US$ ${cr.franquiciaUSD} FOB por envío sin derecho de importación ni tasa de estadística. El IVA se paga igual.`, fuente:'envios' });
     } else {
-      conviene.push({ t:`Lo de ${e.tienda} pasa la franquicia`, d:`Vale ${valor}. Sobre lo que supera US$ ${cr.franquiciaUSD} se paga un ${Math.round(cr.derechoExcedente * 100)}%, y ya está sumado en tu total. Si querés que lo miremos juntos, escribinos antes de confirmar.`, fuente:'envios' });
+      conviene.push({ t:`Lo de ${e.tienda} pasa la franquicia`, d:`Vale ${valor}. Sobre lo que supera US$ ${cr.franquiciaUSD} paga derecho de importación y tasa de estadística, además del IVA de todo el envío. Ya está sumado en tu total; el detalle línea por línea está en Impuestos → Calculadora.`, fuente:'envios' });
     }
   }
   if (exterior.length && !P.computaPercepciones)

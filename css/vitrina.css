@@ -374,3 +374,30 @@
     padding-right:28px;
   }
 }
+
+/* ---- Sin resultados: por qué y qué hacer, paso a paso ---- */
+.v-vacio{ background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:22px 24px; max-width:780px; }
+.v-vacio-cab{ display:flex; gap:14px; align-items:flex-start; }
+.v-vacio-ic{ flex:none; width:44px; height:44px; border-radius:50%; background:var(--accion-suave); color:var(--accion); display:grid; place-items:center; }
+.v-vacio-ic .ic{ width:22px; height:22px; }
+.v-vacio h2{ font-size:19px; margin:0 0 6px; }
+.v-vacio-cab p{ margin:0 0 6px; color:var(--tx-2); line-height:1.5; }
+.v-vacio-cab small{ color:var(--tx-3); }
+.v-vacio-condicion{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--tx-2); background:var(--surface-2); border-radius:var(--r); padding:8px 10px; margin:16px 0 4px; }
+.v-vacio-condicion .ic{ width:16px; height:16px; }
+.v-vacio h3{ font-size:15px; margin:16px 0 8px; }
+.v-vacio-pasos{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.v-vacio-pasos li{ display:grid; grid-template-columns:30px minmax(0,1fr); gap:12px; border:1px solid var(--line-soft); border-radius:var(--r-lg); padding:12px 14px; }
+.v-vacio-n{ width:28px; height:28px; border-radius:50%; background:var(--accion); color:var(--accion-tx); display:grid; place-items:center; font-weight:700; font-size:14px; }
+.v-vacio-pasos p{ margin:4px 0 8px; font-size:13.5px; color:var(--tx-2); line-height:1.45; }
+.v-vacio-pasos .btn .ic{ width:14px; height:14px; }
+.v-sigue{ display:flex; gap:8px; align-items:center; font-size:13px; color:var(--tx-2); background:var(--accion-suave); border-radius:var(--r); padding:8px 12px; margin-bottom:10px; }
+.v-sigue i{ width:10px; height:10px; border-radius:50%; background:var(--accion); animation:v-latido 1s ease-in-out infinite; flex:none; }
+@keyframes v-latido{ 50%{ opacity:.3; transform:scale(.7); } }
+@media (prefers-reduced-motion: reduce){ .v-sigue i{ animation:none; } }
+.v-ayuda{ font-size:12px; color:var(--tx-3); line-height:1.45; margin:8px 0 0; }
+@media (max-width:560px){
+  .v-vacio{ padding:16px; }
+  .v-vacio-pasos li{ grid-template-columns:minmax(0,1fr); }
+  .v-vacio-n{ display:none; }
+}

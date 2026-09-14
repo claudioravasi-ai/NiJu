@@ -17,6 +17,8 @@ import { filaCluster, vacio, selectorMoneda, logoTienda, foto } from './componen
 import { tarjetaResultado, esqueletoGrilla, descuentoDe, cargaInfinita, selectorVista, vistaGuardada } from './vitrina.js';
 import { esDueno } from '../engine/sesion.js';
 import { RUBROS } from '../data/catalog.js';
+import { CONFIG } from '../config.js';
+import { PERFILES } from '../engine/fiscal.js';
 
 const ORDENES = [
   { id:'relevancia', n:'Más relevantes' },
@@ -56,6 +58,8 @@ export function vistaResultados(params, ir){
   let datos = null;
   let pagina = 0, acumulado = [], hayMas = false;
   let cargando = false, turno = 0;
+  let progresoTiendas = { ok:0, total:0 };
+  let parcialPendiente = null, ultimoParcial = 0;
   let visibles = [];
   let vista = vistaGuardada();
   let conFiltros = true;      // en la computadora, la columna de filtros se puede esconder
@@ -97,7 +101,9 @@ export function vistaResultados(params, ir){
         datos ? el('span', { class:'v-cuenta' }, `${num(visibles.length)} ${visibles.length === 1 ? 'resultado' : 'resultados'}`) : null,
         el('span', { class:'spacer' }),
         el('span', { class:'v-vivo' + (listo ? '' : ' esperando'), title:'Cada precio se le pregunta a la tienda en el momento' },
-          el('i'), listo ? `En vivo en ${meta.tiendasOk} tiendas` : 'Consultando tiendas…', listo ? hace : null),
+          el('i'), listo ? `En vivo en ${meta.tiendasOk} tiendas`
+            : progresoTiendas.total ? `Buscando: respondieron ${progresoTiendas.ok} de ${progresoTiendas.total} tiendas` : 'Consultando tiendas…',
+          listo ? hace : null),
         el('button', { class:'v-refrescar' + (cargando ? ' girando' : ''), title:'Volver a preguntarle el precio a cada tienda',
                        'aria-label':'Actualizar precios', onclick:() => cargar({ forzar:true }) }, ic('refrescar'))));
     actualizarHace();
@@ -228,7 +234,9 @@ export function vistaResultados(params, ir){
       grupo('Cómo ver los precios',
         selectorMoneda(() => repintar()),
         el('div', { class:'v-segmento' }, ...[['courier', 'Courier puerta a puerta'], ['general', 'Importación formal']].map(([id, texto]) =>
-          el('button', { class:'v-chip' + (filtros.regimen === id ? ' on' : ''), onclick:() => { filtros.regimen = id; recalcular(); } }, texto)))));
+          el('button', { class:'v-chip' + (filtros.regimen === id ? ' on' : ''), onclick:() => { filtros.regimen = id; recalcular(); } }, texto))),
+        el('p', { class:'v-ayuda' },
+          'Solo cambia cómo estimamos los impuestos de lo que viene de afuera. Courier: pequeño envío para uso personal (hasta US$ 3.000, 50 kg y 3 unidades iguales, 5 envíos por año). Importación formal: con despachante, para vender o compras grandes.')));
   }
 
   function pintarFiltros(){
@@ -279,8 +287,17 @@ export function vistaResultados(params, ir){
     visibles = g;
 
     pintarCabecera(); pintarToolbar(); pintarActivos();
-    if (!g.length){ destacados.replaceChildren(); lista.replaceChildren(sinResultados(datos, q, ir, rubro)); return; }
-    destacados.replaceChildren(franjaDestacados(g, abrir) || '');
+    if (!g.length){
+      destacados.replaceChildren('');
+      /* Mientras siguen contestando tiendas, "no hay nada" todavía no es cierto. */
+      lista.replaceChildren(cargando ? esqueletoGrilla(8) : sinResultados({ datos, q, ir, rubro, filtros }));
+      return;
+    }
+    const faltan = progresoTiendas.total - progresoTiendas.ok;
+    destacados.replaceChildren(cargando && faltan > 0
+      ? el('div', { class:'v-sigue', role:'status' }, el('i'),
+          `Te mostramos lo que ya llegó. Seguimos buscando en ${faltan} ${faltan === 1 ? 'tienda' : 'tiendas'} más: la lista se completa sola.`)
+      : franjaDestacados(g, abrir) || '');
     pintarLista(animar);
   }
 
@@ -333,9 +350,14 @@ export function vistaResultados(params, ir){
         const contestaron = est.tiendas.filter(t => t.estado !== 'run').length;
         progreso.firstChild.style.width = Math.max(4, est.tiendas.length ? contestaron / est.tiendas.length * 100 : 100) + '%';
         if (est.listo) progreso.classList.add('listo');
+        progresoTiendas = { ok:contestaron, total:est.tiendas.length };
+        if (!siguiente && !callado && !est.listo && est.ofertas?.length) mostrarParcial(est.ofertas, mio);
+        else pintarCabecera();
       })
     .then(res => {
       if (mio !== turno) return;
+      clearTimeout(parcialPendiente);
+      if (!siguiente) acumulado = [];   // lo parcial se reemplaza por el resultado completo
       const vistos = new Set(acumulado.map(g => g.clave));
       const nuevos = res.grupos.filter(g => !vistos.has(g.clave));
       acumulado = acumulado.concat(nuevos);
@@ -353,6 +375,21 @@ export function vistaResultados(params, ir){
       lista.replaceChildren(vacio('Se cayó la búsqueda', String(e.message || e)));
       infinita.estado('oculto');
     });
+  }
+
+  /* Resultados parciales: como mucho una repintada cada 350 ms, para que
+     la lista no salte con cada tienda que contesta. */
+  function mostrarParcial(ofertas, mio){
+    clearTimeout(parcialPendiente);
+    parcialPendiente = setTimeout(() => {
+      if (mio !== turno || !cargando) return;
+      ultimoParcial = Date.now();
+      const crudo = ofertas.slice();
+      const res = procesar(crudo, q, { rubro, mayorista:filtros.mayorista, regimen:filtros.regimen, orden:filtros.orden });
+      acumulado = res.grupos;
+      datos = { ...res, crudo, meta:{ parcial:true } };
+      repintar(false); pintarFiltros();
+    }, Math.max(0, 350 - (Date.now() - ultimoParcial)));
   }
 
   pintarCabecera(); pintarToolbar(); pintarFiltros();
@@ -420,56 +457,71 @@ function franjaDestacados(g, abrir){
 
 
 /* ------------------------------------------------------------------
-   Cuando no hay resultados hay que decir POR QUÉ, y no echarle la
-   culpa a los filtros si el problema es que nadie lo tiene.
-   Y es el mejor momento para ofrecer las dos cosas que sí resuelven:
-   traerlo de afuera, o pedirlo y que compitan por conseguirlo.
+   Cuando no hay resultados hay que decir POR QUÉ, con palabras simples,
+   y qué hacer después, paso a paso y según la condición ante ARCA.
+   Antes decía 'Ninguna tienda tiene "" disponible · 0 de 0 tiendas'
+   cuando el filtro era una tienda sin conectar: no se entendía nada.
    ------------------------------------------------------------------ */
-function sinResultados(datos, q, ir, rubro){
-  const hayFiltros = datos && datos.grupos && datos.grupos.length > 0;
+function sinResultados({ datos, q, ir, rubro, filtros }){
   const meta = datos?.meta;
-  const sinTiendas = rubro && tiendasActivas({ rubro }).filter(t => t.tipo !== 'propio').length === 0;
-  const nombreRubro = rubro ? (RUBRO_BY_ID[rubro]?.nombre || rubro) : null;
-  /* Si la mayoría de las tiendas no contestó, el problema no es que no
-     haya productos: es que el backend no las está atendiendo. Decirlo
-     es la diferencia entre un error que se arregla y uno que se oculta. */
+  const hayProductos = datos?.grupos?.length > 0;
+  const usuario = store.get('usuario');
+  const perfilId = usuario?.perfilFiscal || 'consumidor_final';
+  const P = PERFILES[perfilId] || PERFILES.consumidor_final;
+  const nombre = id => STORE_BY_ID[id]?.nombre || id;
+  const noConectadas = [...filtros.tiendas].filter(id => !CONFIG.tiendasReales.includes(id)).map(nombre);
   const fallaron = meta ? meta.tiendasTotal - meta.tiendasOk : 0;
-  const casiTodasFallaron = meta && meta.tiendasTotal > 0 && fallaron >= meta.tiendasTotal * 0.6;
+  const casiTodasFallaron = meta?.tiendasTotal > 0 && fallaron >= meta.tiendasTotal * 0.6;
+  const ningunaConsultada = meta && meta.tiendasTotal === 0;
+  const que = q ? `"${q}"` : rubro ? `productos de ${(RUBRO_BY_ID[rubro]?.nombre || rubro).toLowerCase()}` : 'productos';
 
-  return el('div', { class:'card', style:{ padding:'36px 28px', textAlign:'center' } },
-    el('div', { style:{ fontSize:'40px', marginBottom:'10px' } }, hayFiltros ? '🔎' : '🤷'),
-    el('h3', { style:{ marginBottom:'8px' } },
-      hayFiltros ? 'Tus filtros dejaron todo afuera'
-      : casiTodasFallaron ? 'Las tiendas no están respondiendo'
-      : sinTiendas ? `Todavía no tenemos tiendas de ${nombreRubro}`
-      : `Ninguna tienda tiene "${q}" disponible`),
-    el('p', { class:'muted tiny', style:{ maxWidth:'60ch', margin:'0 auto 6px' } },
-      hayFiltros
-        ? 'Hay productos, pero ninguno entra en lo que pediste. Probá aflojar el precio máximo o sumar tiendas.'
-        : casiTodasFallaron
-          ? `${fallaron} de ${meta.tiendasTotal} tiendas no contestaron. No es que no haya productos: es un problema nuestro de conexión. Mirá el estado en Conectores.`
-        : sinTiendas
-          ? `Todavía no hay ninguna tienda de ${nombreRubro} conectada a NiJu. Pero eso no quiere decir que no te lo podamos conseguir: podemos traerlo de afuera o salir a buscarlo por vos.`
-          : 'Buscamos en todas las tiendas conectadas. Lo que había estaba sin stock o no tenía que ver con lo que buscás, así que preferimos no mostrarte nada antes que mostrarte cualquier cosa.'),
-    meta ? el('p', { class:'tiny dim', style:{ marginBottom:'14px' } },
-      `Consultamos ${meta.tiendasOk} de ${meta.tiendasTotal} tiendas.`) : null,
+  let titulo;
+  const porque = [];
+  if (hayProductos){
+    titulo = 'Tus filtros dejaron todo afuera';
+    porque.push(`Encontramos ${num(datos.grupos.length)} productos, pero ninguno cumple todos los filtros que elegiste.`);
+  } else if (casiTodasFallaron){
+    titulo = 'Las tiendas no están respondiendo';
+    porque.push(`${fallaron} de ${meta.tiendasTotal} tiendas no contestaron. No es que no haya productos: es un problema de conexión nuestro.`);
+  } else if (ningunaConsultada){
+    titulo = 'No hay tiendas para consultar con estos filtros';
+    if (noConectadas.length) porque.push(`${noConectadas.join(', ')} todavía no ${noConectadas.length > 1 ? 'están conectadas' : 'está conectada'} a NiJu: no podemos leer sus precios en vivo.`);
+    if (filtros.mayorista) porque.push('Elegiste "Por mayor", y todavía ninguna de las tiendas conectadas vende por mayor.');
+    if (rubro && !porque.length) porque.push(`Todavía no hay tiendas de ${RUBRO_BY_ID[rubro]?.nombre || rubro} conectadas.`);
+    if (!porque.length) porque.push('Con esta combinación de filtros no quedó ninguna tienda para consultar.');
+  } else {
+    titulo = `No encontramos ${que}`;
+    porque.push(`Preguntamos en vivo en ${meta?.tiendasOk ?? 0} tiendas argentinas. Lo que había estaba sin stock o no tenía que ver con lo que buscás, y preferimos no mostrarte cualquier cosa.`);
+  }
 
-    hayFiltros || !esDueno() ? null : el('div', { class:'notice notice-bad', style:{ textAlign:'left', maxWidth:'640px', margin:'0 auto 20px' } },
-      el('b', {}, 'Ojo: las tiendas internacionales todavía no están buscando de verdad. '),
-      'Amazon, eBay, AliExpress y las demás están en modo demostración: simulan precios sobre una lista corta de productos, ' +
-      'así que no pueden encontrar cualquier cosa. Para que busquen en serio hay que cargarles su clave ' +
-      '(eBay y Best Buy son gratis y se hacen en quince minutos).'),
+  const pasos = [];
+  const hayFiltros = filtros.tiendas.size || filtros.mayorista || filtros.tipos.size || filtros.precioMin || filtros.precioMax
+    || filtros.descuentoMin || filtros.envioGratis || filtros.varias || filtros.cuotas || filtros.sinImpuestos;
+  if (casiTodasFallaron && esDueno()) pasos.push({ t:'Revisá los conectores', d:'Mirá cuál tienda está fallando y por qué.', accion:'Ver conectores', hacer:() => ir('#/tiendas') });
+  if (hayFiltros) pasos.push({ t:'Quitá los filtros', d:'Mirá lo que hay en todas las tiendas conectadas, sin limitar por tienda ni por mayor.', accion:'Buscar sin filtros',
+    hacer:() => ir(q ? `#/buscar?q=${encodeURIComponent(q)}` : rubro ? `#/buscar?rubro=${rubro}` : '#/buscar') });
+  if (!hayProductos) pasos.push({ t:'Si lo viste en otra tienda, pegá el link',
+    d:`Copiá el link del producto${noConectadas.length ? ` en ${noConectadas.join(', ')}` : ''} y pegalo en "Traelo por mí". Te decimos qué es para la Aduana, cuánto pagás en cada etapa del viaje y de impuestos, y si te conviene más comprarlo acá.`,
+    accion:'Ir a Traelo por mí', hacer:() => ir('#/pedido') });
+  if (filtros.mayorista) pasos.push(perfilId === 'consumidor_final'
+    ? { t:'Para comprar por mayor, primero tu condición', d:'Como Consumidor Final no podés importar para vender. Podés inscribirte (el Monotributo suele ser el primer paso, consultalo con un contador) o dejar que NiJu importe como importador y te venda la mercadería ya nacionalizada.', accion:'Ver mi condición', hacer:() => ir('#/impuestos?tab=perfil') }
+    : { t:'Por mayor es una compra grande', d:`Como ${P.label} podés importar para vender: va como importación general, con CUIT, inscripción en el Registro de Importadores y despachante. Te acompañamos en cada paso.`, accion:'Ver cómo son las compras grandes', hacer:() => ir('#/grandes') });
+  pasos.push({ t:'Pedí y que compitan', d:'Contanos qué buscás y cuánto pagarías: salimos a buscarlo. Si nadie lo consigue, no pagás nada.', accion:'Publicar el pedido', hacer:() => ir('#/demanda') });
 
-    casiTodasFallaron ? el('button', { class:'btn btn-win', style:{ marginBottom:'16px' },
-      onclick:() => ir('#/tiendas') }, 'Ver qué tienda falla') : null,
-
-    hayFiltros ? null : el('div', { class:'grid g-2', style:{ maxWidth:'620px', margin:'0 auto', textAlign:'left' } },
-      el('div', { class:'card hoverable', onclick:() => ir(`#/pedido?q=${encodeURIComponent(q)}`) },
-        el('b', {}, '🎯 Traelo por mí'),
-        el('p', { class:'tiny muted', style:{ marginTop:'6px' } },
-          'Si lo viste en una tienda de afuera, pegá el link y te lo traemos con todos los trámites hechos.')),
-      el('div', { class:'card hoverable', onclick:() => ir('#/demanda') },
-        el('b', {}, '📣 Pedí y que compitan'),
-        el('p', { class:'tiny muted', style:{ marginTop:'6px' } },
-          'Decí cuánto pagarías y dejá que salgan a buscártelo. Si nadie lo consigue, no pagás nada.'))));
+  return el('section', { class:'v-vacio' },
+    el('div', { class:'v-vacio-cab' },
+      el('span', { class:'v-vacio-ic', 'aria-hidden':'true' }, ic(hayProductos ? 'filtro' : 'buscar')),
+      el('div', {},
+        el('h2', {}, titulo),
+        ...porque.map(p => el('p', {}, p)),
+        meta?.tiendasTotal ? el('small', {}, `Consultamos ${meta.tiendasOk} de ${meta.tiendasTotal} tiendas.`) : null)),
+    el('p', { class:'v-vacio-condicion' }, ic('usuario'),
+      usuario ? `Te orientamos como ${P.label}.` : 'No entraste con tu cuenta: te orientamos como Consumidor Final.',
+      el('button', { class:'p-link', onclick:() => ir('#/impuestos?tab=perfil') }, '¿No es tu condición?')),
+    el('h3', {}, 'Qué podés hacer, paso a paso'),
+    el('ol', { class:'v-vacio-pasos' }, ...pasos.map((p, i) => el('li', {},
+      el('span', { class:'v-vacio-n', 'aria-hidden':'true' }, String(i + 1)),
+      el('div', {},
+        el('b', {}, p.t), el('p', {}, p.d),
+        el('button', { class:'btn btn-sm' + (i === 0 ? ' btn-win' : ''), onclick:p.hacer }, p.accion, ic('der')))))));
 }
