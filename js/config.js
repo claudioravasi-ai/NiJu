@@ -5,7 +5,7 @@ export const CONFIG = {
   nombre: 'NiJu',
   claim: 'Comprá todo, de todo y para todo.',
   claimLargo: 'Un solo lugar. Una app. El mundo a tus dedos: sin trámites, sin riesgos, del deseo a tu casa.',
-  version: '0.4.0',
+  version: '0.4.2',
 
   /** Datos del titular para los términos y el pie. Se completan al
       constituir la empresa (y con ellos, el Data Fiscal de ARCA). */
@@ -39,7 +39,8 @@ export const CONFIG = {
   tiendasReales: ['jumbo', 'easy', 'carrefour', 'vea', 'disco', 'farmacity', 'coto',
                   'fravega', 'cetrogar', 'masonline', 'sportotal',
                   'decathlon', 'reebok', 'timberland', 'ansilta',
-                  'c47street', 'mimo', 'topper', 'portsaid', 'desiderata', 'tascani', 'legacy', 'sportline', 'cebra', 'juleriaque', 'puppis', 'cuspide'],
+                  'c47street', 'mimo', 'topper', 'portsaid', 'desiderata', 'tascani', 'legacy', 'sportline', 'cebra', 'juleriaque', 'puppis', 'cuspide',
+                  'salomon', 'asics', 'fila', 'levis', 'lecoq', 'kosiuko', 'madeinchina'],
 
   /** Con esto en true la app SOLO muestra tiendas que traen datos reales.
       Una oferta simulada, sin foto y sin stock verdadero, no le sirve a

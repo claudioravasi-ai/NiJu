@@ -106,9 +106,27 @@ function concepto(icono, titulo, texto){
     el('p', {}, texto));
 }
 
+/* ---------------- Envío internacional estimado ----------------
+   Correo Argentino, Encomienda Internacional vía aérea: tarifa publicada
+   en pesos (consultada el 14-09-2026), hasta 20 kg, 12 a 15 días. Se pasa
+   a dólares con el oficial del día, así que el estimado sigue la cotización.
+   El 30% de descuento vigente es solo para ayuda familiar, obsequios y
+   muestras: una venta no lo tiene. */
+const CORREO_INTERNACIONAL = {
+  url:'https://www.correoargentino.com.ar/servicios/paqueteria/encomienda-internacional-aerea',
+  zonas:[['mercosur', 'Mercosur'], ['sudamerica', 'Resto de Sudamérica'], ['america', 'Resto de América (EE.UU., México)'], ['europa', 'Europa'], ['mundo', 'Resto del mundo']],
+  tabla:[[1, 66700, 102100, 125000, 133900, 141000], [3, 122400, 176600, 190600, 225500, 237100], [5, 176600, 215000, 248300, 292200, 311000],
+    [10, 287700, 389400, 473500, 511000, 604200], [15, 413700, 539500, 604200, 719200, 766900], [20, 511000, 594300, 670700, 793600, 900900]]
+};
+function envioCorreo(pesoKg, zona){
+  const fila = CORREO_INTERNACIONAL.tabla.find(([kg]) => pesoKg <= kg);
+  const i = CORREO_INTERNACIONAL.zonas.findIndex(([id]) => id === zona);
+  return fila && i >= 0 ? { ars:fila[i + 1], hastaKg:fila[0] } : null;
+}
+
 /* ---------------- ¿Cuánto me queda? ---------------- */
 function calculadora(){
-  const d = { precioUSD:40, unidades:1, costoARS:15000, envioUSD:null, comisionPct:5.4, comisionFijaUSD:0.30, derechoPct:0 };
+  const d = { precioUSD:40, unidades:1, costoARS:15000, envioUSD:null, pesoKg:0.5, zona:'america', comisionPct:5.4, comisionFijaUSD:0.30, derechoPct:0 };
   const salida = el('div');
 
   const campo = (etiqueta, clave, { pref = 'US$', ayuda = '', paso = '0.01' } = {}) => el('label', { class:'k2-campo' },
@@ -122,7 +140,14 @@ function calculadora(){
     const bruto = (d.precioUSD || 0) * (d.unidades || 1);
     const comision = bruto * (d.comisionPct || 0) / 100 + (d.comisionFijaUSD || 0);
     const derecho = bruto * (d.derechoPct || 0) / 100;
-    const netoUSD = bruto - comision - derecho - (d.envioUSD || 0);
+    const peso = (d.pesoKg || 0) * (d.unidades || 1);
+    const correo = d.envioUSD == null ? envioCorreo(peso, d.zona) : null;
+    const envioUSD = d.envioUSD ?? (correo ? correo.ars / FX.oficial : null);
+    const zonaTxt = CORREO_INTERNACIONAL.zonas.find(([id]) => id === d.zona)?.[1] || '';
+    const notaEnvio = d.envioUSD != null ? 'lo cargaste vos'
+      : correo ? `estimado: Correo Argentino aéreo hasta ${correo.hastaKg} kg a ${zonaTxt}, ${plata(correo.ars)} al oficial`
+      : 'más de 20 kg: el Correo no lo lleva, cotizá un courier';
+    const netoUSD = bruto - comision - derecho - (envioUSD || 0);
     const netoARS = netoUSD * FX.oficial;
     const costo = (d.costoARS || 0) * (d.unidades || 1);
     const ganancia = netoARS - costo;
@@ -140,12 +165,14 @@ function calculadora(){
         linea('Comisión de cobro', '− ' + usd(comision),
           `${(d.comisionPct || 0).toLocaleString('es-AR')}% + US$ ${(d.comisionFijaUSD || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 })}`),
         d.derechoPct ? linea('Derecho de exportación', '− ' + usd(derecho), `${d.derechoPct}%`) : null,
-        linea('Envío internacional', d.envioUSD == null ? 'falta cotizar' : '− ' + usd(d.envioUSD)),
+        linea('Envío internacional', envioUSD == null ? 'falta cotizar' : '− ' + usd(envioUSD), notaEnvio),
         linea('Te queda en dólares', usd(netoUSD)),
         linea('En pesos', plata(Math.round(netoARS)), `dólar oficial $ ${Math.round(FX.oficial).toLocaleString('es-AR')}`),
         linea('Menos lo que te cuesta', '− ' + plata(costo)),
         el('div', { class:'cost-line total' }, el('span', {}, 'Ganancia'), el('b', {}, plata(Math.round(ganancia))))),
-      el('p', { class:'c-legal' }, 'No incluye la tasa de servicio del Correo (se ve al declarar), tus impuestos (Monotributo o IVA e Ingresos Brutos) ni el acompañamiento de NiJu. Si falta cotizar el envío, la ganancia real va a ser menor.'));
+      el('p', { class:'c-legal' }, 'El envío estimado sale de la ',
+        el('a', { href:CORREO_INTERNACIONAL.url, target:'_blank', rel:'noopener' }, 'tarifa publicada de Correo Argentino'),
+        ', pasada a dólares con el oficial de hoy; un courier (DHL, FedEx) cotiza aparte y suele ser más rápido y más caro. No incluye la tasa de servicio del Correo (se ve al declarar), tus impuestos (Monotributo o IVA e Ingresos Brutos) ni el acompañamiento de NiJu.'));
   }
   calcular();
 
@@ -156,7 +183,11 @@ function calculadora(){
         campo('Precio de venta por unidad', 'precioUSD'),
         campo('Unidades', 'unidades', { pref:'u.', paso:'1' }),
         campo('Lo que te cuesta cada unidad', 'costoARS', { pref:'$', paso:'1', ayuda:'Materiales, mano de obra y embalaje.' }),
-        campo('Envío internacional', 'envioUSD', { ayuda:'Si lo pagás vos. Cotizalo en el Correo con el peso y el destino.' }),
+        campo('Peso de cada unidad, con embalaje', 'pesoKg', { pref:'kg', paso:'0.1' }),
+        el('label', { class:'k2-campo' }, el('span', {}, 'Destino'),
+          el('select', { class:'inp', onchange:e => { d.zona = e.target.value; calcular(); } },
+            ...CORREO_INTERNACIONAL.zonas.map(([id, t]) => el('option', { value:id, selected:id === d.zona || null }, t)))),
+        campo('Envío internacional', 'envioUSD', { ayuda:'Vacío usa la tarifa publicada del Correo según peso y destino. Si te cotizaron otro, escribilo.' }),
         campo('Comisión de cobro', 'comisionPct', { pref:'%', ayuda:'La plataforma con la que cobrás (PayPal publica 5,4%).' }),
         campo('Cargo fijo por venta', 'comisionFijaUSD', { ayuda:'PayPal publica US$ 0,30 por venta en dólares.' }),
         campo('Derecho de exportación', 'derechoPct', { pref:'%', ayuda:'Depende de la posición arancelaria: confirmalo antes.' })),

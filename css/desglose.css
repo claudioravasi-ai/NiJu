@@ -100,3 +100,153 @@
   .dz-pos{ grid-template-columns:minmax(0,1fr); }
   .dz-pos-die{ grid-row:auto; grid-column:1; text-align:left; }
 }
+
+/* ============================================================
+   Rediseño tipo checkout (14-09-2026): pasos numerados, tarjetas
+   de opción, resumen fijo al costado y barra con el total en el
+   celular. Pedido de Claudio: "más e-commerce, que invite a completar".
+   ============================================================ */
+.dz-layout{ display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px; align-items:start; }
+.dz-main{ display:flex; flex-direction:column; gap:14px; min-width:0; }
+.dz-sec{ scroll-margin-top:calc(var(--alto-cab, 58px) + 70px); }
+
+/* ---- Progreso ---- */
+.dz-progreso{ position:sticky; top:calc(var(--alto-cab, 58px) + 6px); z-index:5; background:var(--surface); border-radius:var(--r-pill);
+  box-shadow:var(--shadow-2); padding:6px; }
+.dz-progreso ol{ list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:4px; }
+.dz-progreso button{ width:100%; display:flex; align-items:center; justify-content:center; gap:8px; padding:7px 8px; border:0; border-radius:var(--r-pill);
+  background:none; color:var(--tx-2); font:inherit; font-size:13px; font-weight:600; cursor:pointer; min-width:0; }
+.dz-progreso button:hover{ background:var(--surface-2); }
+.dz-p-n{ width:24px; height:24px; flex:none; border-radius:50%; display:grid; place-items:center; background:var(--surface-2); color:var(--tx-2); font-size:12px; font-weight:700; }
+.dz-p-n .ic{ width:14px; height:14px; }
+.dz-p-t{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dz-progreso li.hecho .dz-p-n{ background:var(--win); color:var(--win-ink); }
+.dz-progreso li.hecho button{ color:var(--tx); }
+.dz-progreso li.actual button{ background:var(--accion-suave); color:var(--accion); }
+.dz-progreso li.actual .dz-p-n{ background:var(--accion); color:var(--accion-tx); }
+
+/* ---- Encabezado de paso ---- */
+.dz-sec > h2.dz-cab{ font-size:19px; gap:12px; margin-bottom:6px; }
+.dz-cab small{ display:block; font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--tx-3); }
+.dz-cab-n{ width:34px; height:34px; flex:none; border-radius:50%; display:grid; place-items:center; font-size:15px; font-weight:700;
+  background:var(--accion); color:var(--accion-tx); }
+.dz-cab-n.listo{ background:var(--win); color:var(--win-ink); }
+.dz-sec > h2 .dz-cab-n .ic{ width:18px; height:18px; color:inherit; }
+.dz-h3{ font-size:15px; margin:18px 0 4px; padding-top:14px; border-top:1px solid var(--line-soft); }
+.dz-prod-tit{ margin:0 0 10px; font-size:15px; }
+.dz-req{ font-style:normal; font-weight:500; font-size:11px; color:var(--tx-3); }
+.dz-falta .k2-input{ border-color:var(--bad); box-shadow:0 0 0 3px color-mix(in srgb, var(--bad) 14%, transparent); }
+.dz-falta .dz-req, .dz-falta > span{ color:var(--bad); }
+.k2-campo.dz-falta .inp{ border-color:var(--bad); }
+
+/* ---- Tarjetas de opción ---- */
+.dz-grupo{ margin-bottom:12px; }
+.dz-tarjetas{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; }
+.dz-tarjeta, .dz-op, .dz-via{ display:flex; align-items:center; gap:12px; text-align:left; width:100%; padding:12px 14px; border:1px solid var(--line-firme);
+  border-radius:var(--r-lg); background:var(--surface); color:var(--tx); font:inherit; cursor:pointer; min-width:0;
+  transition:border-color .15s, box-shadow .15s, transform .1s; }
+.dz-tarjeta:hover, .dz-op:hover, .dz-via:hover{ border-color:var(--accion); box-shadow:var(--shadow-2); }
+.dz-tarjeta:active, .dz-op:active, .dz-via:active{ transform:scale(.99); }
+.dz-tarjeta.on, .dz-op.on, .dz-via.on{ border-color:var(--accion); box-shadow:0 0 0 1px var(--accion), var(--shadow-2); background:color-mix(in srgb, var(--accion) 5%, var(--surface)); }
+.dz-radio{ width:20px; height:20px; flex:none; border-radius:50%; border:2px solid var(--line-firme); position:relative; }
+.on > .dz-radio{ border-color:var(--accion); }
+.on > .dz-radio::after{ content:''; position:absolute; inset:3px; border-radius:50%; background:var(--accion); }
+.dz-tarjeta-txt, .dz-op-txt, .dz-via-txt{ display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.dz-tarjeta-txt b, .dz-op-txt b, .dz-via-txt b{ font-size:14.5px; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.dz-tarjeta-txt small, .dz-op-txt small, .dz-via-txt small{ font-size:12.5px; color:var(--tx-2); line-height:1.35; }
+.dz-badge{ font-style:normal; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:var(--r-pill); background:var(--accion-suave); color:var(--accion); }
+.dz-badge.win{ background:color-mix(in srgb, var(--win) 15%, var(--surface)); color:var(--win-tx); }
+.dz-mas{ margin-top:12px; border-top:1px solid var(--line-soft); padding-top:10px; }
+.dz-mas > summary{ cursor:pointer; font-weight:600; color:var(--accion); font-size:13.5px; }
+.dz-mas[open] > summary{ margin-bottom:8px; }
+
+/* ---- Operadores ---- */
+.dz-ops{ display:flex; flex-direction:column; gap:8px; margin:10px 0 4px; }
+.dz-op-txt .dz-sello{ margin:4px 0 0; align-self:flex-start; }
+.dz-op-plazo{ display:inline-flex; align-items:center; gap:4px; }
+.dz-op-plazo .ic{ width:13px; height:13px; }
+.dz-op-precio{ display:flex; flex-direction:column; align-items:flex-end; text-align:right; flex:none; }
+.dz-op-precio b{ font-size:17px; }
+.dz-op-precio small{ font-size:12px; color:var(--tx-3); }
+
+/* ---- Vías ---- */
+.dz-vias{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.dz-via-precio{ display:flex; flex-direction:column; align-items:flex-end; font-size:17px; font-weight:700; flex:none; text-align:right; }
+.dz-via-precio small{ font-size:11.5px; font-weight:500; color:var(--warn); }
+.dz-via.no{ opacity:.7; }
+.dz-via.no .dz-via-precio{ font-size:13px; color:var(--tx-3); }
+.dz-vacio{ display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; padding:28px 16px; border:2px dashed var(--line-firme); border-radius:var(--r-lg); color:var(--tx-2); }
+.dz-vacio .ic{ width:32px; height:32px; color:var(--accion); margin-bottom:4px; }
+.dz-vacio b{ color:var(--tx); font-size:16px; }
+.dz-vacio .btn{ margin-top:10px; }
+
+/* ---- Desglose más de tienda ---- */
+.dz-etapa-cab{ background:var(--surface-2); border-radius:var(--r); padding:8px 12px; border-bottom:0; margin-top:12px; }
+.dz-linea summary{ padding:10px 12px; }
+.dz-linea summary:hover{ background:var(--surface-2); }
+.dz-linea-cuerpo{ padding:2px 12px 12px; }
+.dz-total.grande b{ font-size:26px; }
+
+/* ---- Resumen ---- */
+.dz-resumen{ position:sticky; top:calc(var(--alto-cab, 58px) + 70px); min-width:0; }
+.dz-r-card{ background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-2); padding:16px; display:flex; flex-direction:column; gap:12px; }
+.dz-r-card > h2{ font-size:17px; margin:0; }
+.dz-r-prod{ display:grid; grid-template-columns:56px minmax(0,1fr); gap:10px; align-items:center; }
+.dz-r-prod img, .dz-r-sinfoto{ width:56px; height:56px; border-radius:var(--r); object-fit:contain; background:#fff; box-shadow:inset 0 0 0 1px var(--line-soft); display:grid; place-items:center; }
+.dz-r-sinfoto .ic{ width:24px; height:24px; color:var(--tx-3); }
+.dz-r-prod b{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:14px; line-height:1.3; }
+.dz-r-prod small{ font-size:12px; color:var(--tx-3); }
+.dz-r-lineas{ display:flex; flex-direction:column; gap:6px; padding-top:10px; border-top:1px solid var(--line-soft); }
+.dz-r-linea{ display:flex; justify-content:space-between; gap:10px; font-size:13.5px; }
+.dz-r-linea span{ color:var(--tx-2); min-width:0; }
+.dz-r-linea small{ display:block; font-size:11px; color:var(--tx-3); }
+.dz-r-linea b{ white-space:nowrap; font-weight:600; }
+.dz-r-total{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding-top:10px; border-top:1px solid var(--line); flex-wrap:wrap; }
+.dz-r-total span{ font-weight:600; }
+.dz-r-total b{ font-size:26px; letter-spacing:-.02em; }
+.dz-r-total.vacio b{ color:var(--tx-3); }
+.dz-r-total small{ width:100%; font-size:12px; color:var(--tx-3); }
+.dz-r-recupera{ margin:-4px 0 0; font-size:12.5px; color:var(--win-tx); display:flex; align-items:center; gap:4px; }
+.dz-r-recupera .ic{ width:14px; height:14px; }
+.dz-r-nota{ margin:-4px 0 0; font-size:12px; color:var(--warn); }
+.dz-r-check{ background:var(--surface-2); border-radius:var(--r); padding:10px 12px; }
+.dz-r-check-cab{ display:flex; justify-content:space-between; font-size:13.5px; margin-bottom:6px; }
+.dz-r-check-cab span{ color:var(--tx-3); font-weight:600; }
+.dz-p-barra{ height:6px; border-radius:var(--r-pill); background:var(--line); overflow:hidden; }
+.dz-p-barra i{ display:block; height:100%; background:var(--win); border-radius:inherit; transition:width .3s; }
+.dz-r-check ul{ list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:4px; font-size:13px; }
+.dz-r-check li.ok{ color:var(--win-tx); }
+.dz-r-check li .ic{ width:13px; height:13px; vertical-align:-2px; }
+.dz-r-check .p-link{ font-size:13px; text-align:left; }
+.dz-r-grupal{ display:flex; flex-direction:column; gap:2px; text-align:left; padding:10px 12px; border:0; border-radius:var(--r);
+  background:color-mix(in srgb, var(--warn) 18%, var(--surface)); color:var(--tx); font:inherit; cursor:pointer; }
+.dz-r-grupal span{ font-size:12.5px; color:var(--tx-2); }
+.dz-r-cta{ font-size:16px; }
+.dz-r-confianza{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--tx-2); }
+.dz-r-confianza li{ display:flex; align-items:center; gap:6px; }
+.dz-r-confianza .ic{ width:14px; height:14px; color:var(--win-tx); }
+
+/* ---- Barra del celular ---- */
+.dz-barra{ display:none; }
+
+@media (max-width:980px){
+  .dz-layout{ grid-template-columns:minmax(0,1fr); }
+  .dz-resumen{ position:static; }
+  .dz-barra{ display:flex; position:sticky; bottom:0; z-index:6; align-items:center; justify-content:space-between; gap:12px;
+    margin:0 -4px; padding:10px 14px; background:var(--surface); border-radius:var(--r-lg) var(--r-lg) 0 0; box-shadow:0 -4px 16px rgba(0,0,0,.14); }
+  .dz-barra small{ display:block; font-size:11.5px; color:var(--tx-3); }
+  .dz-barra b{ font-size:20px; }
+}
+@media (max-width:560px){
+  .dz-progreso{ border-radius:var(--r-lg); }
+  .dz-p-t{ display:none; }
+  .dz-vias{ grid-template-columns:minmax(0,1fr); }
+  .dz-op{ flex-wrap:wrap; }
+  .dz-op-precio{ flex-direction:row; align-items:baseline; gap:6px; margin-left:32px; }
+  .dz-tarjetas{ grid-template-columns:minmax(0,1fr); }
+}
+@media (prefers-reduced-motion:reduce){ .dz-tarjeta, .dz-op, .dz-via, .dz-p-barra i{ transition:none; } }
+@media (max-width:560px){
+  .dz-op-txt{ flex-basis:calc(100% - 40px); }
+  .dz-op-precio{ width:100%; margin-left:32px; justify-content:flex-start; }
+}

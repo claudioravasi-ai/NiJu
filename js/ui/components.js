@@ -115,6 +115,8 @@ const DOMINIO_TIENDA = {
   desiderata:'desiderata.com.ar', tascani:'tascani.com.ar', legacy:'legacy.com.ar',
   sportline:'sportline.com.ar', cebra:'cebra.com.ar', juleriaque:'juleriaque.com.ar',
   puppis:'puppis.com.ar', cuspide:'cuspide.com',
+  salomon:'salomonstore.com.ar', asics:'asics.com.ar', fila:'fila.com.ar', levis:'levi.com.ar',
+  lecoq:'lecoqsportif.com.ar', kosiuko:'kosiuko.com', madeinchina:'made-in-china.com',
   tiendamia:'tiendamia.com', amazon:'amazon.com', ebay:'ebay.com', aliexpress:'aliexpress.com', alibaba:'alibaba.com',
   '1688':'1688.com', temu:'temu.com', shein:'shein.com', walmart:'walmart.com',
   bestbuy:'bestbuy.com', etsy:'etsy.com', dhgate:'dhgate.com', tiktokshop:'tiktok.com',

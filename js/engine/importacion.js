@@ -44,8 +44,8 @@ export function desglosar(e){
   const {
     fobUSD = 0, unidades = 1, pesoKg = 1, via = 'pequeno', destino = 'uso',
     perfilId = 'consumidor_final', inscriptoGanancias = false, enviosAnio = 0,
-    die = null, ivaReducido = false, costos = {}, sellos = {}, detalles = {},
-    tc = { tarjeta:1, oficial:1 }, feeUSD = null
+    die = null, ivaReducido = false, costos = {}, sellos = {}, detalles = {}, fuentes = {},
+    tc = { tarjeta:1, oficial:1 }, feeUSD = null, pago = 'tarjeta'
   } = e;
   const P = PERFILES[perfilId] || PERFILES.consumidor_final;
   const lineas = [], avisos = [], requisitos = [];
@@ -62,21 +62,37 @@ export function desglosar(e){
     ? { usd:null, sello:'falta' } : { usd:+costos[campo], sello:sellos[campo] || sello };
 
   /* ---------- Etapas 1 y 2: producto y flete ---------- */
-  linea({ etapa:'origen', id:'fob', k:'Precio del producto (valor FOB)', usd:fobUSD, cambio:tc.tarjeta, sello:'tuyo',
+  /* Lo que se paga afuera va al dólar oficial. Si se paga con tarjeta en
+     pesos, el banco suma la percepción del 30% (RG 5617/2024): va en su
+     propia línea porque se recupera. Oficial + 30% = el "dólar tarjeta". */
+  linea({ etapa:'origen', id:'fob', k:'Precio del producto (valor FOB)', usd:fobUSD, cambio:tc.oficial, sello:'tuyo',
     formula: unidades > 1 ? `${unidades} unidades` : 'lo que dice la tienda',
-    explica:'FOB es el precio de la mercadería puesta en el punto de salida, sin el viaje internacional ni el seguro. Es el valor que Aduana usa para ver si entrás en la franquicia. Lo pagás con tarjeta, por eso va al dólar tarjeta.' });
+    explica:'FOB es el precio de la mercadería puesta en el punto de salida, sin el viaje internacional ni el seguro. Es el valor que Aduana usa para ver si entrás en la franquicia. En pesos va al dólar oficial; el recargo de la tarjeta está aparte.' });
 
   const origen = costo('origenUSD', 'tuyo');
-  linea({ etapa:'origen', id:'origen', k:'Envío de la tienda al punto de salida', usd:origen.usd, cambio:tc.tarjeta, sello:origen.sello,
-    formula:detalles.origenUSD || 'lo que cobra la tienda',
+  linea({ etapa:'origen', id:'origen', k:'Envío de la tienda al punto de salida', usd:origen.usd, cambio:tc.oficial, sello:origen.sello,
+    formula:detalles.origenUSD || 'lo que cobra la tienda', fuente:fuentes.origenUSD,
     explica:'Lo que cobra el vendedor por llevar el paquete al correo de su país, al depósito del marketplace o a tu casillero. Si la tienda dice "envío gratis", es cero.' });
 
   const inter = costo('internacionalUSD', 'publicada');
-  linea({ etapa:'internacional', id:'internacional', k:'Viaje internacional (avión o barco)', usd:inter.usd, cambio:tc.tarjeta, sello:inter.sello,
-    formula:detalles.internacionalUSD || '', fuente:e.fuenteOperador,
-    explica:'El flete del courier, el correo o el casillero hasta Argentina. Se cobra por kilo. Aduana lo suma al valor para calcular los tributos.' });
+  linea({ etapa:'internacional', id:'internacional', k:'Viaje internacional (avión o barco)', usd:inter.usd, cambio:tc.oficial, sello:inter.sello,
+    formula:detalles.internacionalUSD || '', fuente:fuentes.internacionalUSD || e.fuenteOperador,
+    explica:'El flete del courier, el correo o el casillero hasta Argentina. Se cobra por kilo (o por peso volumétrico, si es mayor). Aduana lo suma al valor para calcular los tributos.' });
 
   const seguro = +costos.seguroUSD || 0;
+  if (seguro) linea({ etapa:'internacional', id:'seguro', k:'Seguro de la carga', usd:seguro, cambio:tc.oficial, sello:sellos.seguroUSD || 'tuyo',
+    formula:detalles.seguroUSD || '', fuente:fuentes.seguroUSD,
+    explica:'Cubre la mercadería si se pierde o se daña en el viaje. Aduana lo suma al valor en aduana (CIF), así que también paga derecho, tasa e IVA.' });
+
+  const pagadoAfueraUSD = fobUSD + (origen.usd || 0) + (inter.usd || 0) + seguro;
+  if (pago === 'tarjeta') linea({ etapa:'internacional', id:'percepcionTarjeta', k:'Percepción del 30% por pagar con tarjeta en pesos',
+    usd:pagadoAfueraUSD * 0.30, ars:Math.round(pagadoAfueraUSD * (tc.tarjeta - tc.oficial)), sello:'norma',
+    fuente:{ titulo:'Boletín Oficial — RG 5617/2024 de ARCA', url:'https://www.boletinoficial.gob.ar/detalleAviso/primera/318447/20241219' },
+    formula:`30% sobre ${usdTxt(pagadoAfueraUSD)} pagados afuera (producto, fletes y seguro)`,
+    recupero: inscriptoGanancias
+      ? { tipo:'aCuenta', texto:'Es un adelanto de Ganancias o Bienes Personales: lo descontás en tu declaración jurada.' }
+      : { tipo:'devolucion', texto:'Si no estás inscripto en Ganancias ni en Bienes Personales, la pedís en devolución a ARCA con clave fiscal.' },
+    explica:'No es un impuesto de Aduana: lo cobra el banco en el resumen cuando pagás en pesos una compra en moneda extranjera. Por eso el "dólar tarjeta" es el oficial más 30%. Si pagás el saldo en dólares con dólares propios, entre el cierre y el vencimiento del resumen, no se cobra.' });
   const flete = (origen.usd || 0) + (inter.usd || 0);
   const cif = fobUSD + flete + seguro;
   const fleteIncompleto = origen.usd == null || inter.usd == null;
@@ -85,11 +101,12 @@ export function desglosar(e){
   const arribo = costo('arriboUSD', 'publicada');
   linea({ etapa:'arribo', id:'arribo', k: via === 'pequeno' ? 'Gestión del courier o del correo' : 'Almacenaje en depósito fiscal',
     usd: via === 'pequeno' ? arribo.usd : (costos.depositoUSD == null ? null : +costos.depositoUSD),
-    sello: via === 'pequeno' ? arribo.sello : (costos.depositoUSD == null ? 'falta' : 'tuyo'),
-    formula: via === 'pequeno' ? (detalles.arriboUSD || '') : 'lo cotiza el depósito',
+    sello: via === 'pequeno' ? arribo.sello : (costos.depositoUSD == null ? 'falta' : sellos.depositoUSD || 'tuyo'),
+    formula: via === 'pequeno' ? (detalles.arriboUSD || '') : (detalles.depositoUSD || 'lo cotiza el depósito'),
+    fuente: via === 'pequeno' ? fuentes.arriboUSD : fuentes.depositoUSD,
     explica: via === 'pequeno'
       ? 'El courier cobra por hacer la declaración y el trámite; Correo Argentino cobra siempre una tasa de servicio y almacenaje. Si el operador no publica el monto, cargá el que te informen.'
-      : 'En la importación general la carga espera en un depósito fiscal hasta el despacho, y el depósito cobra por los días que está. No hay tarifa pública: se pide presupuesto.' });
+      : 'En la importación general la carga espera en un depósito fiscal hasta el despacho. La terminal de Ezeiza (TCA) publica un precio fijo por peso que incluye los primeros 7 días; si el despacho se demora, se suma un cargo por día. Otros depósitos cotizan aparte.' });
 
   /* ---------- Etapa 4: tributos ---------- */
   const ivaPct = ivaReducido ? NORMAS.iva.reducida : NORMAS.iva.general;
@@ -155,7 +172,7 @@ export function desglosar(e){
 
     const desp = costos.despachanteUSD == null ? null : +costos.despachanteUSD;
     linea({ etapa:'aduana', id:'despachante', k:'Honorarios del despachante de aduana', usd:desp,
-      sello: desp == null ? 'falta' : (sellos.despachanteUSD || 'tuyo'), fuente:{ titulo:'CDA — honorario mínimo sugerido', url:DESPACHANTE_REFERENCIA.url },
+      sello: desp == null ? 'falta' : (sellos.despachanteUSD || 'tuyo'), fuente:fuentes.despachanteUSD || { titulo:'CDA — honorario mínimo sugerido', url:DESPACHANTE_REFERENCIA.url },
       formula: desp == null ? 'pedí presupuesto' : (detalles.despachanteUSD || ''),
       explica:`El despachante es el profesional matriculado que hace el despacho ante Aduana. ${DESPACHANTE_REFERENCIA.texto}` });
 
@@ -167,7 +184,8 @@ export function desglosar(e){
   /* ---------- Etapa 5: a tu casa ---------- */
   linea({ etapa:'ultima', id:'ultima', k:'Envío de la Aduana a tu casa', usd:null,
     ars: costos.ultimaMillaARS == null ? null : Math.round(+costos.ultimaMillaARS),
-    sello: costos.ultimaMillaARS == null ? 'falta' : 'tuyo', formula: e.provincia ? `hasta ${e.provincia}` : '',
+    sello: costos.ultimaMillaARS == null ? 'falta' : sellos.ultimaMillaARS || 'tuyo',
+    formula: detalles.ultimaMillaARS || (e.provincia ? `hasta ${e.provincia}` : ''), fuente:fuentes.ultimaMillaARS,
     explica:'El reparto del courier, Correo Argentino o un transporte hasta tu puerta. Cuesta distinto según la distancia.' });
 
   if (feeUSD != null) linea({ etapa:'ultima', id:'niju', k:'Gestión de NiJu', usd:feeUSD, cambio:tc.tarjeta, sello:'niju',
@@ -196,7 +214,12 @@ export function desglosar(e){
  * Qué conviene: pequeño envío, importación general o comprarlo en el país.
  * Solo compara opciones disponibles y avisa cuando falta cotizar algo.
  */
-export function recomendar({ pequeno, general, local = null, destino = 'uso', perfilId = 'consumidor_final', unidades = 1 }){
+/* Lo que cuesta el viaje en avión o barco. Si pasa este porcentaje del valor
+   del producto, traerlo solo no conviene. */
+export const TOPE_FLETE = 0.25;
+const fleteARS = d => d?.disponible ? d.lineas.find(l => l.id === 'internacional')?.ars ?? null : null;
+
+export function recomendar({ pequeno, general, local = null, destino = 'uso', perfilId = 'consumidor_final', unidades = 1, fobARS = 0, pesoKg = 0 }){
   const opciones = [];
   if (pequeno?.disponible) opciones.push({ id:'pequeno', nombre:'Pequeño envío (courier o correo)', ars:pequeno.totalARS, completo:pequeno.completo });
   if (general?.disponible && perfilId !== 'consumidor_final') opciones.push({ id:'general', nombre:'Importación general con despachante', ars:general.totalARS, completo:general.completo });
@@ -206,7 +229,19 @@ export function recomendar({ pequeno, general, local = null, destino = 'uso', pe
   const P = PERFILES[perfilId] || PERFILES.consumidor_final;
   if (!pequeno?.disponible) motivos.push('No se puede traer como pequeño envío: ' + pequeno.motivos.join(' '));
   const pasos = pasosAseguir({ pequeno, general, local, perfilId, P });
-  if (!opciones.length) return { elegida:null, opciones, motivos, cuidado, pasos, titulo:'Así como estás, no podés importarlo directo: te mostramos cómo seguir' };
+
+  /* El avión o el barco sale caro para uno solo. Pedido de Claudio: decir que
+     no conviene y mandar a la compra grupal, que reparte el flete entre todos. */
+  const fletes = [pequeno, general].map(fleteARS).filter(v => v != null);
+  const menorFlete = fletes.length ? Math.min(...fletes) : null;
+  const caroSolo = fobARS > 0 && menorFlete != null && menorFlete / fobARS > TOPE_FLETE;
+  if (caroSolo){
+    const pct = Math.round(menorFlete / fobARS * 100);
+    const barco = pesoKg >= 45 ? ' Con este peso, pedí también cotización por barco: tarda semanas pero cobra mucho menos por kilo.' : '';
+    cuidado.unshift(`No te conviene traerlo solo: el avión o el barco cuesta ${pct}% del valor del producto, aun por la vía más barata. En una compra grupal el flete se reparte entre todos y a cada uno le toca una parte.${barco}`);
+    pasos.unshift({ t:'Sumalo a una compra grupal', d:`Solo el viaje internacional cuesta ${pct}% del producto. Juntándose con otros compradores, el flete, el depósito y el despachante se dividen y el precio por unidad baja.${barco}`, accion:'grupal' });
+  }
+  if (!opciones.length) return { elegida:null, opciones, motivos, cuidado, pasos, caroSolo, titulo: caroSolo ? 'Traerlo solo no conviene: sumate a una compra grupal' : 'Así como estás, no podés importarlo directo: te mostramos cómo seguir' };
 
   opciones.sort((a, b) => a.ars - b.ars);
   const mejor = opciones[0], segunda = opciones[1];
@@ -220,8 +255,10 @@ export function recomendar({ pequeno, general, local = null, destino = 'uso', pe
       motivos.push(`Si lo vendés al precio más barato del país (${local.tienda}), te queda un margen bruto del ${Math.round(margen * 100)}% antes de tus propios impuestos y gastos de venta.`);
     }
   }
-  return { elegida:mejor.id, opciones, motivos, cuidado, pasos,
-    titulo: mejor.id === 'local' ? `Te conviene comprarlo en ${local.tienda}` : `Te conviene: ${mejor.nombre.toLowerCase()}` };
+  return { elegida:mejor.id, opciones, motivos, cuidado, pasos, caroSolo,
+    titulo: mejor.id === 'local' ? `Te conviene comprarlo en ${local.tienda}`
+      : caroSolo ? 'Traerlo solo no conviene: sumate a una compra grupal'
+      : `Te conviene: ${mejor.nombre.toLowerCase()}` };
 }
 
 /* Qué hacer, en orden, según la vía posible y la condición ante ARCA.

@@ -186,6 +186,36 @@ export const STORES = [
     integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Librería con sucursales en todo el país. Corre sobre WooCommerce.' },
     checkout:'redirect', comision:0, envioDias:[3,8], envioBase:4200, reputacion:4.3, cuotas:0 },
 
+  { id:'salomon', nombre:'Salomon', abbr:'SL', color:'#1D1D1B', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['deportes','moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial argentina (salomonstore.com.ar) sobre Shopify.' },
+    checkout:'redirect', comision:0, envioDias:[3,8], envioBase:4900, reputacion:4.1, cuotas:0 },
+
+  { id:'asics', nombre:'Asics', abbr:'AS', color:'#001E62', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['deportes','moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial sobre VTEX. Catálogo público abierto.' },
+    checkout:'redirect', comision:0, envioDias:[3,7], envioBase:4900, reputacion:4.1, cuotas:0 },
+
+  { id:'fila', nombre:'Fila', abbr:'FI', color:'#002D62', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['deportes','moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial (tienda.fila.com.ar) sobre VTEX.' },
+    checkout:'redirect', comision:0, envioDias:[3,7], envioBase:4900, reputacion:4.1, cuotas:0 },
+
+  { id:'levis', nombre:'Levi\'s', abbr:'LV', color:'#C41230', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial sobre VTEX. Jeans e indumentaria.' },
+    checkout:'redirect', comision:0, envioDias:[3,7], envioBase:4900, reputacion:4.1, cuotas:0 },
+
+  { id:'lecoq', nombre:'Le Coq Sportif', abbr:'LC', color:'#1E3A8A', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['deportes','moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial sobre WooCommerce.' },
+    checkout:'redirect', comision:0, envioDias:[3,8], envioBase:4900, reputacion:4.1, cuotas:0 },
+
+  { id:'kosiuko', nombre:'Kosiuko', abbr:'KO', color:'#111111', tipo:'nacional', pais:'AR', moneda:'ARS',
+    rubros:['moda'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Tienda oficial sobre Magento: se lee su buscador público (GraphQL). No publica stock por esa vía.' },
+    checkout:'redirect', comision:0, envioDias:[3,8], envioBase:4900, reputacion:4.1, cuotas:0 },
+
   /* ---------------- INTERNACIONALES ---------------- */
   /* Tiendamia no es una tienda sino un intermediario: compra en tiendas
      de EE.UU. (Amazon, eBay, Walmart y otras) y entrega en Argentina con
@@ -220,6 +250,11 @@ export const STORES = [
     rubros:['mayorista','tecnologia','hogar','moda','herramientas','construccion','juguetes','belleza'],
     integracion:{ modo:'partner', estado:'pendiente', notas:'B2B con MOQ. Precio por escalón de cantidad. Requiere gestión de RFQ.' },
     checkout:'redirect', comision:0.02, envioDias:[20,50], envioBase:0, reputacion:4.1, mayorista:true, moq:10 },
+
+  { id:'madeinchina', nombre:'Made-in-China', abbr:'MC', color:'#C8102E', tipo:'internacional', pais:'CN', moneda:'USD',
+    rubros:['mayorista','tecnologia','hogar','moda','deportes','herramientas','construccion','juguetes','belleza'],
+    integracion:{ modo:'catalogo-publico', estado:'listo', notas:'Mayorista chino B2B. Precio FOB en dólares por rango y pedido mínimo (MOQ): sin flete ni impuestos. Se lee la búsqueda pública en español.' },
+    checkout:'redirect', comision:0, envioDias:[20,50], envioBase:0, reputacion:4.0, mayorista:true },
 
   { id:'1688', nombre:'1688.com', abbr:'88', color:'#FF5000', tipo:'internacional', pais:'CN', moneda:'CNY',
     rubros:['mayorista','tecnologia','hogar','moda','herramientas','juguetes','belleza'],

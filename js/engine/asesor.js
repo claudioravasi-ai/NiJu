@@ -190,8 +190,8 @@ const TEMAS = [
 
   { si:q => /(dolar|tipo de cambio|cotizacion|en pesos)/.test(q),
     r:c => c.tipoDeCambio
-      ? `Lo que pagás afuera (producto y fletes) lo calculamos al dólar tarjeta, hoy ${ars(c.tipoDeCambio.tarjeta)}; los tributos y gastos de Aduana, al dólar oficial, hoy ${ars(c.tipoDeCambio.oficial)}.`
-      : 'Lo que pagás afuera lo calculamos al dólar tarjeta y los tributos de Aduana al dólar oficial, con la cotización del día.' },
+      ? `Todo va al dólar oficial, hoy ${ars(c.tipoDeCambio.oficial)}. Si pagás afuera con tarjeta en pesos, el banco suma el 30% de percepción (RG 5617/2024), que va en su propia línea y se recupera: oficial más 30% es el dólar tarjeta, hoy ${ars(c.tipoDeCambio.tarjeta)}. Pagando el resumen con dólares propios no se cobra.`
+      : 'Todo va al dólar oficial del día. Si pagás afuera con tarjeta en pesos, se suma el 30% de percepción, que se recupera y mostramos aparte.' },
 
   { si:q => /(declar|clave fiscal|pagar los impuestos|como pago|donde pago)/.test(q),
     r:() => 'Por courier, el courier hace la declaración y te cobra los tributos. Por Correo Argentino, declarás y pagás en la web de ARCA, en "Envíos Postales Internacionales", con clave fiscal nivel 2 como mínimo. En la importación general lo hace el despachante.' },

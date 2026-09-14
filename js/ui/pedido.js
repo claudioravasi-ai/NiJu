@@ -35,6 +35,41 @@ const TIENDAS_EJEMPLO = ['amazon', 'aliexpress', 'meli', 'ebay', 'shein', 'temu'
 
 const pct = v => `${(v * 100).toLocaleString('es-AR', { maximumFractionDigits:2 })}%`;
 
+/* AliExpress, Temu, SHEIN y Amazon no dejan que un programa lea sus fichas.
+   Del link mismo se saca lo que se puede: la tienda, de dónde viene y, si el
+   link lo trae escrito, el nombre del producto. Lo demás lo carga el cliente. */
+const DESDE_CHINA = /aliexpress|temu|shein|alibaba|made-in-china|banggood|dhgate/i;
+const TIENDAS_LINK = [[/aliexpress/i, 'AliExpress'], [/temu/i, 'Temu'], [/shein/i, 'SHEIN'], [/alibaba/i, 'Alibaba'], [/made-in-china/i, 'Made-in-China'],
+  [/amazon/i, 'Amazon'], [/ebay/i, 'eBay'], [/walmart/i, 'Walmart'], [/bestbuy/i, 'Best Buy']];
+
+function leerLink(u){
+  let url; try{ url = new URL(u); }catch{ return {}; }
+  const host = url.hostname.replace(/^www\./, '');
+  const nombre = TIENDAS_LINK.find(([rx]) => rx.test(host))?.[1] || host;
+  /* Amazon: /Nombre-Del-Producto/dp/ASIN · SHEIN y Temu: /nombre-p-123.html o /nombre-g-123.html */
+  const tramo = url.pathname.split('/').filter(Boolean)
+    .map(p => decodeURIComponent(p).replace(/\.html?$/i, '').replace(/-(p|g)-\d+.*$/i, ''))
+    .filter(p => /[a-z]/i.test(p) && p.split('-').length >= 3 && !/^(dp|item|gp|product|goods)$/i.test(p))[0];
+  const titulo = tramo ? tramo.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
+  return { titulo, origen:DESDE_CHINA.test(host) ? 'china' : /amazon\.com$|ebay\.com$|walmart|bestbuy/i.test(host) ? 'eeuu' : null,
+    tienda:{ nombre, tipo:/\.ar$/.test(host) ? 'nacional' : 'internacional', moneda:/\.ar$/.test(host) ? 'ARS' : 'USD' } };
+}
+
+/* Hasta 25 segundos y un reintento: una red lenta del teléfono no es un error. */
+async function pedirResolver(u){
+  for (let intento = 1; ; intento++){
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    try{
+      const r = await fetch(`${CONFIG.api}/resolver?url=${encodeURIComponent(u)}`, { signal:ctrl.signal });
+      const texto = await r.text();
+      try{ return JSON.parse(texto); }catch{ throw new Error(`el servidor respondió ${r.status} sin datos`); }
+    }catch(e){
+      if (intento >= 2) throw e;
+    }finally{ clearTimeout(t); }
+  }
+}
+
 export function vistaPedido(ir){
   const raiz = el('div', { class:'wrap c-cuenta' });
   const cuerpo = el('div');
@@ -60,8 +95,7 @@ export function vistaPedido(ir){
     estado.scrollIntoView({ behavior:'smooth', block:'start' });
 
     try{
-      const r = await fetch(`${CONFIG.api}/resolver?url=${encodeURIComponent(u)}`);
-      const d = await r.json();
+      const d = await pedirResolver(u);
       datos = d;
       if (!d.ok || !d.titulo){
         // El backend puede devolver un error técnico: al cliente le hablamos claro.
@@ -71,18 +105,41 @@ export function vistaPedido(ir){
           el('div', { class:'tiny', style:{ marginTop:'5px' } },
             d.sugerencia || 'No pasa nada: cargá los datos a mano acá abajo y te cotizamos igual, con impuestos y gestión incluidos.'),
           tecnico && d.error ? el('div', { class:'tiny dim', style:{ marginTop:'4px' } }, 'Detalle técnico: ' + d.error) : null));
+        estado.append(tarjetaOrigen(u, d.tienda));
         pintarManual(u, d.tienda);
         return;
       }
       pintarEncontrado(d);
     }catch(e){
+      datos = null;
+      const motivo = !navigator.onLine ? 'Tu teléfono o computadora está sin internet.'
+        : e.name === 'AbortError' ? 'La tienda tardó demasiado en responder (probamos dos veces).'
+        : 'No pudimos hablar con el servidor de NiJu (probamos dos veces).';
       estado.replaceChildren(el('div', { class:'notice notice-bad', style:{ marginBottom:'12px' } },
-        el('b', {}, 'No pudimos conectarnos para leer el link.'),
-        el('div', { class:'tiny', style:{ marginTop:'5px' } }, 'Cargá los datos a mano y te cotizamos igual.')));
+        el('b', {}, 'No pudimos leer el link. '), motivo,
+        el('div', { class:'tiny', style:{ marginTop:'5px' } }, 'Completá abajo el precio (y el nombre si no aparece) y te cotizamos igual. ',
+          el('button', { class:'p-link', onclick:buscarLink }, 'Probar de nuevo')),
+        e.name !== 'AbortError' && e.message ? el('div', { class:'tiny dim', style:{ marginTop:'4px' } }, 'Detalle técnico: ' + e.message) : null),
+        tarjetaOrigen(u, null));
       pintarManual(u, null);
     }
   };
   link.addEventListener('keydown', e => { if (e.key === 'Enter') buscarLink(); });
+
+  /* Si la tienda no deja leer la ficha, igual mostramos de dónde es el producto
+     y un botón grande para abrirlo: ahí el cliente ve la foto y copia el precio.
+     No se puede mostrar adentro de la app: esas tiendas prohíben abrirse en otro sitio. */
+  const tarjetaOrigen = (u, tienda) => {
+    const l = leerLink(u);
+    const nombre = tienda?.nombre || l.tienda?.nombre || 'la tienda';
+    return el('section', { class:'t-origen' },
+      el('span', { class:'t-origen-ic' }, ic('tienda')),
+      el('div', { class:'t-origen-txt' },
+        el('small', {}, `Producto en ${nombre}`),
+        el('b', {}, l.titulo || 'Tu producto'),
+        el('span', {}, `${nombre} no deja que la app lea su página. Abrila, mirá la foto y el precio, y completalos abajo.`)),
+      el('a', { class:'btn btn-win', href:u, target:'_blank', rel:'noopener' }, 'Abrir el producto en ', nombre, ' ↗'));
+  };
 
   /* Campo de precio grande, como en la calculadora */
   const campoPrecio = etiqueta => el('label', { class:'k2-campo' },
@@ -126,8 +183,9 @@ export function vistaPedido(ir){
 
   /* ---------- Carga a mano ---------- */
   function pintarManual(u, tienda){
-    form.url = u; form.tienda = tienda || { nombre:'Tienda externa', tipo:'internacional', moneda:'USD' };
-    form.titulo = ''; form.precio = 0; form.moneda = form.tienda.moneda || 'USD'; form.imagen = null;
+    const delLink = leerLink(u);
+    form.url = u; form.tienda = tienda || delLink.tienda || { nombre:'Tienda externa', tipo:'internacional', moneda:'USD' };
+    form.titulo = delLink.titulo || ''; form.origen = delLink.origen; form.precio = 0; form.moneda = form.tienda.moneda || 'USD'; form.imagen = null;
 
     const campo = (etiqueta, clave, ayuda) => el('label', { class:'k2-campo' }, el('span', {}, etiqueta),
       el('input', { class:'inp', value:form[clave] ?? '', oninput:e => { form[clave] = e.target.value; pintarCotizador(); } }),
@@ -159,8 +217,9 @@ export function vistaPedido(ir){
       const clave = leido ? `${form.url}|${form.titulo}` : `${form.url}|manual`;
       if (panel?.clave !== clave){
         panel = panelImportacion({ ir, alConfirmar:pedirImportacion, producto: leido
-          ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url }
-          : null });
+          ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url, imagen:form.imagen }
+          : null,
+          sugerido:leido ? null : { titulo:form.titulo, origen:form.origen, tienda:form.tienda } });
         panel.clave = clave;
       }
       if (leido) panel.actualizarPrecio(form.precio, form.moneda);
