@@ -367,13 +367,7 @@
 
 /* La fila de filtros rápidos se desliza con el dedo: un degradado en el
    borde derecho avisa que hay más, para que no parezca cortada. */
-@media (max-width:900px){
-  .v-toolbar .v-chips{
-    -webkit-mask-image:linear-gradient(90deg, #000 85%, transparent);
-            mask-image:linear-gradient(90deg, #000 85%, transparent);
-    padding-right:28px;
-  }
-}
+/* (el degradado de la fila de filtros ahora lo maneja .v-chips-caja, abajo) */
 
 /* ---- Sin resultados: por qué y qué hacer, paso a paso ---- */
 .v-vacio{ background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:22px 24px; max-width:780px; }
@@ -401,3 +395,25 @@
   .v-vacio-pasos li{ grid-template-columns:minmax(0,1fr); }
   .v-vacio-n{ display:none; }
 }
+
+/* ---- Fila de filtros rápidos con flechas (14-09-2026) ----
+   La última tienda quedaba cortada en seco contra "Ordenar por". Ahora la
+   fila se desvanece del lado donde hay más pastillas y una flecha la desplaza. */
+.v-chips-caja{ position:relative; display:flex; align-items:center; flex:1; min-width:0; }
+.v-chips-caja .v-chips{ flex:1; scroll-behavior:smooth; }
+.v-chips-caja.hay-der .v-chips{ -webkit-mask-image:linear-gradient(90deg, #000 calc(100% - 64px), transparent); mask-image:linear-gradient(90deg, #000 calc(100% - 64px), transparent); }
+.v-chips-caja.hay-izq .v-chips{ -webkit-mask-image:linear-gradient(90deg, transparent, #000 64px); mask-image:linear-gradient(90deg, transparent, #000 64px); }
+.v-chips-caja.hay-izq.hay-der .v-chips{ -webkit-mask-image:linear-gradient(90deg, transparent, #000 64px, #000 calc(100% - 64px), transparent); mask-image:linear-gradient(90deg, transparent, #000 64px, #000 calc(100% - 64px), transparent); }
+.v-chips-flecha{ position:absolute; top:50%; z-index:2; width:30px; height:30px; margin-top:-15px; display:none; place-items:center; padding:0;
+  border:0; border-radius:50%; background:var(--surface); color:var(--tx); box-shadow:var(--shadow-2); cursor:pointer; }
+.v-chips-flecha .ic{ width:16px; height:16px; }
+.v-chips-flecha:hover{ color:var(--accion); }
+.v-chips-flecha.izq{ left:0; }
+.v-chips-flecha.der{ right:0; }
+.v-chips-caja.hay-izq .v-chips-flecha.izq, .v-chips-caja.hay-der .v-chips-flecha.der{ display:grid; }
+@media (max-width:900px){
+  .v-toolbar .v-chips-caja{ order:3; flex:1 0 100%; }
+  .v-toolbar .v-chips-caja:not(.hay-der):not(.hay-izq) .v-chips{ -webkit-mask-image:none; mask-image:none; }
+  .v-toolbar .v-chips{ padding-right:2px; }
+}
+@media (hover:none){ .v-chips-flecha{ display:none !important; } }

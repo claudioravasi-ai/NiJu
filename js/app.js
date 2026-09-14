@@ -32,6 +32,7 @@ import { listarOrdenes } from './engine/ordenes.js';
 import { misPedidos } from './engine/demanda.js';
 import { tiendasActivas } from './connectors/registry.js';
 import { logoTienda, selectorDolar, selectorMoneda } from './ui/components.js';
+import { iniciarIdioma, idioma, cambiarIdioma, IDIOMAS } from './i18n.js';
 
 const NAV = [
   { ruta:'#/',          icono:'casa',     label:'Inicio' },
@@ -212,6 +213,10 @@ function construirShell(){
                 onclick:contarToques }, logoNiju('logo-top')),
       el('div', { class:'search' }, ic('buscar'), buscador),
       botonTema(),
+      /* Idioma a mano en la cabecera: en el celular el pie queda lejos. */
+      el('button', { class:'iconbtn btn-idioma', 'data-no-traducir':'1', title:idioma() === 'es' ? 'English' : 'Español',
+        'aria-label':idioma() === 'es' ? 'Switch to English' : 'Cambiar a español', onclick:() => cambiarIdioma(idioma() === 'es' ? 'en' : 'es') },
+        idioma() === 'es' ? 'EN' : 'ES'),
       /* Atajo al Panel para el dueño. Sin esto, desde el celular no había
          forma de entrar: el menú lateral no existe en pantallas chicas. */
       esDueno()
@@ -486,7 +491,8 @@ function piePagina(){
             el('small', {}, 'Cambia cómo ves la equivalencia. Una compra al exterior se calcula con lo que cuesta pagar afuera.')),
           el('div', { class:'pie-ajustes-fila' }, el('span', { class:'tiny', style:{ fontWeight:'600', color:'var(--tx)' } }, 'Moneda principal'),
             selectorMoneda(() => window.dispatchEvent(new Event('niju:dolar')))),
-          el('label', {}, 'Idioma', el('select', { 'aria-label':'Idioma' }, el('option', {}, 'Español (Argentina)'))))),
+          el('label', {}, 'Idioma', el('select', { 'aria-label':'Idioma', 'data-no-traducir':'1', onchange:e => cambiarIdioma(e.target.value) },
+            ...IDIOMAS.map(([id, nombre]) => el('option', { value:id, selected:idioma() === id || null }, nombre)))))),
       el('div', {}, el('h4', {}, 'Comprar'), el('ul', {},
         enlace('Buscar en todas las tiendas', '#/buscar'), enlace('Traelo por mí', '#/pedido'), enlace('Compras grandes', '#/grandes'),
         enlace('Compra grupal', '#/grupal'), enlace('Por mayor', '#/mayorista'), enlace('Pedí y que compitan', '#/demanda'),
@@ -508,6 +514,7 @@ function piePagina(){
 }
 
 async function iniciar(){
+  iniciarIdioma();
   aplicarTema(temaGuardado() || 'auto');
   const ctx = construirShell();
   aplicarTema(temaGuardado() || 'auto');   // ya con el botón en pantalla

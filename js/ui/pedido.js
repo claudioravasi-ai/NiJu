@@ -19,6 +19,7 @@ import { comprobanteGestion, ALICUOTAS } from '../engine/facturacion.js';
 import { aPesos, aUSD, FX } from '../engine/fx.js';
 import { store } from '../state.js';
 import { foto, logoTienda, cargandoNiju, botonVolver } from './components.js';
+import { mismaIntencion } from '../engine/demanda.js';
 
 /* Pasos que NiJu se compromete a hacer por el cliente */
 const TRAMITES = [
@@ -96,6 +97,13 @@ export function vistaPedido(ir){
 
     try{
       const d = await pedirResolver(u);
+      /* Temu a veces responde con otra ficha (sus recomendados) en vez del producto
+         del link: si el link trae el nombre y no se parece a lo leído, ese precio no se usa. */
+      const delLink = leerLink(u).titulo;
+      if (d.ok && d.titulo && delLink && !mismaIntencion(delLink, d.titulo)){
+        Object.assign(d, { ok:false, error:'La tienda nos mostró un producto distinto al de tu link.',
+          sugerencia:'Abrí el producto en la tienda y completá el precio abajo: te cotizamos igual.' });
+      }
       datos = d;
       if (!d.ok || !d.titulo){
         // El backend puede devolver un error técnico: al cliente le hablamos claro.
@@ -219,7 +227,7 @@ export function vistaPedido(ir){
         panel = panelImportacion({ ir, alConfirmar:pedirImportacion, producto: leido
           ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url, imagen:form.imagen }
           : null,
-          sugerido:leido ? null : { titulo:form.titulo, origen:form.origen, tienda:form.tienda } });
+          sugerido:leido ? null : { titulo:form.titulo, origen:form.origen, tienda:form.tienda, url:form.url } });
         panel.clave = clave;
       }
       if (leido) panel.actualizarPrecio(form.precio, form.moneda);

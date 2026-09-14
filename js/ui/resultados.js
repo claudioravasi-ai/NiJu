@@ -132,15 +132,30 @@ export function vistaResultados(params, ir){
       chip('En varias tiendas', filtros.varias, () => filtros.varias = !filtros.varias),
       ...top.map(id => chip(STORE_BY_ID[id]?.nombre || id, filtros.tiendas.has(id), () => alternar(filtros.tiendas, id), logoTienda(id))));
 
+    /* La fila de pastillas se desliza: flechas y degradado avisan de qué lado hay
+       más. Antes la última tienda quedaba cortada en seco y parecía rota. */
+    const flecha = (lado, icono, etiqueta) => el('button', { class:`v-chips-flecha ${lado}`, 'aria-label':etiqueta, tabindex:'-1',
+      onclick:() => chips.scrollBy({ left:(lado === 'izq' ? -1 : 1) * Math.max(160, chips.clientWidth * 0.7), behavior:'smooth' }) }, ic(icono));
+    const caja = el('div', { class:'v-chips-caja' }, flecha('izq', 'izq', 'Ver filtros anteriores'), chips, flecha('der', 'der', 'Ver más filtros'));
+    const bordes = () => {
+      const max = chips.scrollWidth - chips.clientWidth;
+      caja.classList.toggle('hay-izq', chips.scrollLeft > 4);
+      caja.classList.toggle('hay-der', chips.scrollLeft < max - 4);
+    };
+    chips.addEventListener('scroll', bordes, { passive:true });
+    if (!toolbar._bordes){ toolbar._bordes = true; addEventListener('resize', () => toolbar._medir?.()); }
+    toolbar._medir = bordes;
+
     toolbar.replaceChildren(
       el('button', { class:'v-btn-filtros' + (!MOVIL.matches && conFiltros ? ' on' : ''), onclick:abrirFiltros },
         ic('filtro'), 'Filtros', n ? el('b', {}, String(n)) : null),
-      chips,
+      caja,
       el('label', { class:'v-orden' }, el('span', {}, 'Ordenar por'),
         el('select', { onchange:e => cambiar(() => filtros.orden = e.target.value) },
           ...ORDENES.map(o => el('option', { value:o.id, selected:filtros.orden === o.id || null }, o.n)))),
       selectorVista(vista, v => { vista = v; pintarLista(); }));
     chips.scrollLeft = antes;
+    requestAnimationFrame(bordes);
   }
 
   function abrirFiltros(){

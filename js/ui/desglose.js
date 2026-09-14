@@ -22,6 +22,7 @@ import { PERFILES } from '../engine/fiscal.js';
 import { SELLO, CONSULTADO } from '../data/normas-importacion.js';
 import { ETAPAS, OPERADORES, OPERADOR_BY_ID, DESPACHANTE_REFERENCIA, CIUDADES_CHINA, CIUDAD_CHINA_BY_ID, referencia } from '../data/etapas-envio.js';
 import { desglosar, recomendar } from '../engine/importacion.js';
+import { guardarPendiente } from '../engine/grupal.js';
 import { cargarArancel, arancelListo, buscarPosiciones, porCodigo, descripcionCompleta } from '../engine/arancel.js';
 import { clasificarProducto, preguntarAsesor } from '../engine/asesor.js';
 import { buscar } from '../engine/search.js';
@@ -415,6 +416,28 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
     return { fob, peso, op, pequeno, general, consejo };
   }
 
+  /* Lleva el producto a Compra grupal ya calculado: cuánto sale traerlo solo y
+     cuánto por unidad comprando entre varios (el mismo cálculo, con más unidades:
+     el flete, el depósito y el despachante se reparten). */
+  const META_GRUPAL = 10;
+  function irAGrupal(r){
+    const d = s.tab === 'pequeno' && r.pequeno.disponible ? r.pequeno : r.general.disponible ? r.general : r.pequeno;
+    const unidades = s.unidades;
+    let g;
+    s.unidades = unidades * META_GRUPAL;
+    try{ g = calcular(); }finally{ s.unidades = unidades; }
+    const dg = g.general.disponible ? g.general : g.pequeno;
+    const L = (x, id) => x.disponible ? (x.lineas.find(l => l.id === id)?.ars || 0) : 0;
+    guardarPendiente({
+      titulo:s.titulo, imagen:producto?.imagen || null, url:producto?.url || sugerido?.url || null,
+      tienda:producto?.tienda?.nombre || sugerido?.tienda?.nombre || '', unidades, pesoKg:s.pesoKg, origen:s.origen, meta:META_GRUPAL,
+      soloARS:Math.round((d.totalARS || 0) / unidades),
+      grupoARS:Math.round((dg.totalARS || 0) / (unidades * META_GRUPAL)),
+      motivo:L(d, 'fob') ? `Traerlo solo, el avión o el barco cuesta ${Math.round(L(d, 'internacional') / L(d, 'fob') * 100)}% del valor del producto.` : ''
+    });
+    ir('#/grupal');
+  }
+
   function recalcular(){
     const r = calcular();
     s.resultado = r;
@@ -531,7 +554,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
           el('ul', {}, ...datos.map(([t, ok, n]) => el('li', { class:ok ? 'ok' : '' },
             ok ? el('span', {}, ic('check'), ' ', t) : el('button', { class:'p-link', onclick:() => irAPaso(n) }, '○ ', t, ' →'))))),
 
-        r.consejo.caroSolo ? el('button', { class:'dz-r-grupal', onclick:() => ir('#/grupal') },
+        r.consejo.caroSolo ? el('button', { class:'dz-r-grupal', onclick:() => irAGrupal(r) },
           el('b', {}, 'Traerlo solo no conviene'), el('span', {}, 'Sumate a una compra grupal y dividí el flete →')) : null,
 
         alConfirmar ? el('button', { class:'btn btn-lg btn-win btn-block dz-r-cta', disabled:hayImportacion ? null : true, onclick:pedir },
@@ -630,7 +653,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
           el('ol', { class:'v-vacio-pasos', style:{ marginBottom:'12px' } }, ...c.pasos.map((p, i) => el('li', {},
             el('span', { class:'v-vacio-n', 'aria-hidden':'true' }, String(i + 1)),
             el('div', {}, el('b', {}, p.t), el('p', {}, p.d),
-              p.accion === 'grupal' ? el('button', { class:'btn btn-sm btn-win', onclick:() => ir('#/grupal') }, 'Armar una compra grupal', ic('der'))
+              p.accion === 'grupal' ? el('button', { class:'btn btn-sm btn-win', onclick:() => irAGrupal(r) }, 'Armar una compra grupal con este producto', ic('der'))
               : p.accion === 'grandes' ? el('button', { class:'btn btn-sm', onclick:() => ir('#/grandes') }, 'Ver cómo son las compras grandes', ic('der'))
               : p.accion === 'perfil' ? el('button', { class:'btn btn-sm', onclick:() => ir('#/impuestos?tab=perfil') }, 'Cambiar mi condición', ic('der')) : null))))] : null,
         !s.posicion ? el('div', { class:'notice', style:{ marginBottom:'8px' } }, 'Falta elegir la posición NCM: sin ella no sabemos el derecho de importación.') : null,

@@ -4,9 +4,11 @@
    invita porque le conviene: el marketing lo hacen ellos.
    ============================================================ */
 import { el, plata, num, ic, toast, fecha, hoja } from '../util.js';
-import { campanias, estadoCampania, reservar, resultadoCampania, SENA_PCT, crearCampania, sincronizar, estadoSync } from '../engine/grupal.js';
+import { campanias, estadoCampania, reservar, resultadoCampania, SENA_PCT, crearCampania, sincronizar, estadoSync,
+  pendiente, olvidarPendiente, campaniaPara, proponerCampania } from '../engine/grupal.js';
 import { FAMILIAS } from '../data/nicho-maquinas.js';
 import { store } from '../state.js';
+import { esDueno } from '../engine/sesion.js';
 import { foto } from './components.js';
 
 export function vistaGrupal(ir){
@@ -17,8 +19,10 @@ export function vistaGrupal(ir){
     const cs = campanias();
     const abiertas = cs.filter(c => ['abierta','alcanzada'].includes(estadoCampania(c).estado));
     const cerradas = cs.filter(c => !['abierta','alcanzada'].includes(estadoCampania(c).estado));
+    const p = pendiente();
 
     cuerpo.replaceChildren(...[
+      p ? seccionPendiente(p, ir, pintar) : null,
       el('section', { class:'section' },
         el('div', { class:'kicker' }, 'Comprá con otros'),
         avisoSync(),
@@ -34,12 +38,16 @@ export function vistaGrupal(ir){
         el('h2', { style:{ marginBottom:'14px' } }, 'Campañas abiertas'),
         el('div', { class:'grid g-2' }, ...abiertas.map(c => tarjeta(c, pintar)))) : null,
 
-      !cs.length ? el('div', { class:'card center', style:{ padding:'44px' } },
+      /* Sin campañas: el cliente arma una desde su producto; el Panel es solo del dueño
+         (antes el botón mandaba a todos a la clave del dueño). */
+      !cs.length && !p ? el('div', { class:'card center', style:{ padding:'44px' } },
         el('div', { style:{ fontSize:'40px' } }, '🤝'),
-        el('h3', { style:{ margin:'10px 0 6px' } }, 'Todavía no hay campañas abiertas'),
+        el('h3', { style:{ margin:'10px 0 6px' } }, 'Todavía no hay compras grupales abiertas'),
         el('p', { class:'muted tiny', style:{ maxWidth:'52ch', margin:'0 auto 14px' } },
-          'Las campañas se lanzan desde el Panel, en Radar de oportunidades. Elegís un producto y se arma sola con sus escalones de precio.'),
-        el('button', { class:'btn btn-win', onclick:() => ir('#/panel') }, 'Ir al Panel')) : null,
+          esDueno() ? 'Lanzá una desde el Panel, en Radar de oportunidades: elegís un producto y se arma sola con sus escalones de precio.'
+            : 'Pegá el link de lo que querés en "Traelo por mí". Si traerlo solo sale caro, desde ahí abrís la compra grupal con tu producto ya calculado.'),
+        esDueno() ? el('button', { class:'btn btn-win', onclick:() => ir('#/panel') }, 'Ir al Panel')
+          : el('button', { class:'btn btn-win', onclick:() => ir('#/pedido') }, ic('mundo'), 'Cotizar un producto')) : null,
 
       cerradas.length ? el('section', { class:'section' },
         el('h2', { style:{ marginBottom:'14px' } }, 'Cerradas'),
@@ -61,6 +69,63 @@ function avisoSync(){
     estadoSync.error ? el('div', { class:'tiny dim', style:{ marginTop:'4px' } }, 'Detalle: ' + estadoSync.error) : null);
 }
 
+/* ---------------- El producto que viene de "Traelo por mí" ---------------- */
+function seccionPendiente(p, ir, refrescar){
+  const existente = campaniaPara({ titulo:p.titulo, url:p.url });
+  const ahorro = p.soloARS > 0 ? Math.round((1 - p.grupoARS / p.soloARS) * 100) : 0;
+  const irACampania = id => setTimeout(() => document.getElementById(`camp-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 60);
+
+  const nombre = el('input', { class:'inp', placeholder:'Tu nombre', value:store.get('usuario')?.nombre || '' });
+  const email  = el('input', { class:'inp', type:'email', placeholder:'tu@email.com', value:store.get('usuario')?.email || '' });
+  const cant   = el('input', { class:'inp', type:'number', min:'1', value:String(p.unidades || 1) });
+
+  const abrir = el('button', { class:'btn btn-lg btn-win btn-block', onclick:async () => {
+    if (!nombre.value.trim()) return toast('Poné tu nombre para reservar tu lugar', 'bad');
+    abrir.disabled = true;
+    try{
+      const c = await proponerCampania({ titulo:p.titulo, imagen:p.imagen, itemRef:p.url, precioSolo:p.soloARS, precioGrupo:p.grupoARS,
+        meta:p.meta, nombre:nombre.value.trim(), email:email.value.trim(), cantidad:Math.max(1, +cant.value || 1), notas:p.motivo });
+      olvidarPendiente();
+      toast('¡Compra grupal abierta y tu lugar reservado! Invitá a otros para que baje el precio', 'win');
+      refrescar(); irACampania(c.id);
+    }catch(e){ toast(e.message || 'No se pudo abrir la compra grupal', 'bad'); abrir.disabled = false; }
+  } }, ic('carrito'), 'Abrir la compra grupal y reservar mi lugar');
+
+  return el('section', { class:'g-pend' },
+    el('div', { class:'g-prod' },
+      foto({ imagen:p.imagen, titulo:p.titulo }, 'g-prod-foto'),
+      el('div', { class:'g-prod-txt' },
+        el('small', {}, p.tienda ? `Tu producto en ${p.tienda}` : 'Tu producto'),
+        el('h2', {}, p.titulo || 'Tu producto'),
+        p.motivo ? el('p', {}, p.motivo) : null,
+        el('div', { class:'g-comp' },
+          el('div', {}, el('small', {}, 'Si lo traés solo'), el('b', { class:'g-solo' }, p.soloARS ? plata(p.soloARS) : '—'), el('span', {}, 'por unidad')),
+          el('div', { class:'g-comp-grupo' }, el('small', {}, `Comprando entre ${p.meta}`), el('b', {}, p.grupoARS ? plata(p.grupoARS) : '—'),
+            el('span', {}, ahorro > 0 ? `${ahorro}% menos por unidad, estimado` : 'estimado por unidad'))))),
+
+    existente
+      ? el('div', { class:'g-accion' },
+          el('div', { class:'notice notice-ok' }, el('b', {}, 'Ya hay una compra grupal abierta de este producto. '),
+            `Van ${estadoCampania(existente).reservadas} de ${existente.meta}: sumate y el precio baja para todos.`),
+          el('div', { class:'row wrapf' },
+            el('button', { class:'btn btn-lg btn-win spacer', onclick:() => abrirReserva(existente, () => { olvidarPendiente(); refrescar(); irACampania(existente.id); }) },
+              ic('carrito'), 'Sumarme a esta compra grupal'),
+            el('button', { class:'btn', onclick:() => irACampania(existente.id) }, 'Ver la campaña')))
+      : el('div', { class:'g-accion' },
+          el('h3', {}, 'Abrí la compra grupal de este producto'),
+          el('p', { class:'tiny muted' }, `Queda abierta ${14} días para que se sume gente. Cada vez que alguien entra, el precio baja un escalón para todos. Si no se llega a ${p.meta} unidades, no se compra y no pagás nada.`),
+          el('div', { class:'grid g-3' },
+            el('div', { class:'field' }, el('label', {}, 'Nombre'), nombre),
+            el('div', { class:'field' }, el('label', {}, 'Email para avisarte'), email),
+            el('div', { class:'field' }, el('label', {}, 'Cuántas unidades querés'), cant)),
+          abrir),
+
+    el('div', { class:'row wrapf', style:{ marginTop:'10px', gap:'14px' } },
+      el('button', { class:'p-link tiny', onclick:() => history.back() }, '← Volver al cálculo'),
+      el('button', { class:'p-link tiny', onclick:() => { olvidarPendiente(); refrescar(); } }, 'Quitar este producto')),
+    el('p', { class:'c-legal' }, 'El precio en grupo es una estimación con el mismo cálculo de "Traelo por mí" para todas las unidades juntas: el flete, el depósito y el despachante se reparten. El precio final lo confirmamos al cerrar la compra.'));
+}
+
 const comoFunciona = (n, t, d) => el('div', { class:'card' },
   el('div', { class:'row', style:{ marginBottom:'6px' } },
     el('span', { class:'step-n' }, n), el('b', {}, t)),
@@ -72,7 +137,7 @@ function tarjeta(c, refrescar){
   const colorEstado = { abierta:'var(--accion)', alcanzada:'var(--win)', 'lista-para-comprar':'var(--win)',
                         'no-alcanzo':'var(--bad)', cerrada:'var(--tx-3)' }[e.estado];
 
-  return el('div', { class:'card', style:{ borderTop:`3px solid ${colorEstado}` } },
+  return el('div', { class:'card', id:`camp-${c.id}`, style:{ borderTop:`3px solid ${colorEstado}` } },
     el('div', { class:'row', style:{ gap:'14px', alignItems:'flex-start', marginBottom:'12px' } },
       foto({ imagen:c.imagen, titulo:c.titulo }, '', ),
       el('div', { class:'spacer' },
@@ -130,9 +195,9 @@ function tarjeta(c, refrescar){
   );
 }
 
+/* Margen y capital: solo el dueño. Antes lo veía cualquier cliente con cuenta. */
 function resultadoDueno(c, e){
-  const u = store.get('usuario');
-  if (!u) return null;
+  if (!esDueno()) return null;
   const fam = FAMILIAS.find(f => f.id === c.familiaId);
   const costoUnit = fam ? Math.round(c.precioBase * 0.42) : Math.round(c.precioBase * 0.55);
   const r = resultadoCampania(c, costoUnit);

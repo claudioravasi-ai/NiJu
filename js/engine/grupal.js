@@ -14,6 +14,7 @@ import { store } from '../state.js';
 import { uid } from '../util.js';
 import { CONFIG } from '../config.js';
 import { cabecerasAdmin } from './sesion.js';
+import { mismaIntencion } from './demanda.js';
 
 export const SENA_PCT = 0.30;     // seña para reservar en preventa
 export const DIAS_CAMPANIA = 14;
@@ -83,6 +84,61 @@ export async function crearCampania({ tipo = 'grupal', titulo, imagen, familiaId
 }
 
 export const campanias = () => store.get('campaniasGrupales') || [];
+
+/* ------------------------------------------------------------------
+   Desde "Traelo por mí": cuando traerlo solo sale caro, el producto
+   viaja a Compra grupal ya calculado, para no buscarlo de nuevo.
+   Vive en la pestaña (sessionStorage) y vence en un día.
+   ------------------------------------------------------------------ */
+const CLAVE_PENDIENTE = 'niju.grupalPendiente';
+export function guardarPendiente(p){
+  try{ sessionStorage.setItem(CLAVE_PENDIENTE, JSON.stringify({ ...p, ts:Date.now() })); }catch{}
+}
+export function pendiente(){
+  try{
+    const p = JSON.parse(sessionStorage.getItem(CLAVE_PENDIENTE) || 'null');
+    return p && Date.now() - p.ts < 864e5 ? p : null;
+  }catch{ return null; }
+}
+export function olvidarPendiente(){
+  try{ sessionStorage.removeItem(CLAVE_PENDIENTE); }catch{}
+}
+
+/** Escalones desde lo que sale traerlo solo hasta lo estimado para la meta. */
+export function tramosEstimados(precioSolo, precioGrupo, meta){
+  const piso = Math.min(precioGrupo, precioSolo);
+  const precio = f => Math.round((precioSolo - (precioSolo - piso) * f) / 100) * 100;
+  return [{ desde:1, f:0 }, { desde:Math.max(2, Math.ceil(meta * 0.35)), f:0.4 }, { desde:Math.max(3, Math.ceil(meta * 0.6)), f:0.7 }, { desde:meta, f:1 }]
+    .filter((t, i, a) => i === 0 || t.desde > a[i - 1].desde)
+    .map(t => ({ desde:t.desde, precio:precio(t.f), desc:Math.round((1 - precio(t.f) / precioSolo) * 100) }));
+}
+
+/** ¿Ya hay una campaña abierta de este producto? Por link, o por nombre parecido. */
+export function campaniaPara({ titulo, url }){
+  return campanias().find(c => ['abierta', 'alcanzada'].includes(estadoCampania(c).estado) &&
+    ((url && c.itemRef === url) || (titulo && mismaIntencion(c.titulo, titulo))));
+}
+
+/** Un cliente abre una compra grupal con su reserva adentro. */
+export async function proponerCampania({ titulo, imagen, itemRef, precioSolo, precioGrupo, meta, nombre, email, cantidad, notas }){
+  const tramos = tramosEstimados(precioSolo, precioGrupo, meta);
+  const c = {
+    id:'cg-' + uid(), tipo:'grupal', origen:'cliente', titulo, imagen:imagen || null, itemRef:itemRef || null, familiaId:null,
+    precioBase:precioSolo, meta, tramos, creada:Date.now(), cierra:Date.now() + DIAS_CAMPANIA * 864e5, estado:'abierta', notas:notas || '',
+    reservas:[{ id:uid(), nombre, email:email || null, cantidad, precioAlReservar:tramos[0].precio, sena:0, ts:Date.now() }]
+  };
+  try{
+    const d = await api('/campanias/proponer', { method:'POST', body:JSON.stringify(c) });
+    estadoSync.remoto = true;
+    await sincronizar();
+    return d.campania || c;
+  }catch(e){
+    if (/límite/i.test(e.message || '')) throw e;
+    estadoSync.remoto = false; estadoSync.error = String(e.message || e);
+    store.push('campaniasGrupales', c);
+    return c;
+  }
+}
 
 export function unidadesReservadas(c){
   return (c.reservas || []).reduce((a, r) => a + r.cantidad, 0);
