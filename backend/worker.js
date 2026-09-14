@@ -56,6 +56,8 @@
 
 const TTL = 600;                    // 10 minutos de cache por consulta
 const TIMEOUT = 8000;
+const UA_NIJU = 'Mozilla/5.0 (compatible; NiJuBot/0.1; +https://niju.ar/bot)';
+const UA_VISTA_PREVIA = 'WhatsApp/2.23.20.0';     // así piden las páginas para mostrar la vista previa de un link
 
 export default {
   async fetch(req, env, ctx){
@@ -102,6 +104,15 @@ function corsHeaders(req, env){
   };
 }
 
+/* La copia guardada en caché trae los encabezados CORS de quien la pidió primero
+   (se vio /v1/buscar respondiendo "http://localhost:8771" a la app publicada, que
+   entonces no veía nada). Al devolverla se ponen los de ESTE pedido. */
+function desdeCache(hit, cors){
+  const r = new Response(hit.body, hit);
+  for (const [k, v] of Object.entries(cors)) if (/^access-control-/i.test(k)) r.headers.set(k, v);
+  return r;
+}
+
 const json = (d, headers = {}, status = 200) =>
   new Response(JSON.stringify(d), { status, headers:{ ...headers, 'content-type':'application/json; charset=utf-8' } });
 
@@ -129,7 +140,7 @@ async function buscar(url, env, ctx, cors){
   const clave = new Request(`https://cache.niju/${tienda}?q=${encodeURIComponent(q)}&r=${rubro}&l=${limite}&d=${desde}`);
   const cache = caches.default;
   const hit = await cache.match(clave);
-  if (hit) return hit;
+  if (hit) return desdeCache(hit, cors);
 
   let ofertas = [];
   let error = null;
@@ -552,7 +563,7 @@ async function variantes(url, env, ctx, cors){
   /* La simulación de compra pide "fresco": precio y stock de este momento. */
   if (!url.searchParams.get('fresco')){
     const hit = await caches.default.match(clave);
-    if (hit) return hit;
+    if (hit) return desdeCache(hit, cors);
   }
   try{
     const d = await a.variantes({ id, url:enlace });
@@ -730,7 +741,44 @@ async function campanias(req, url, env, cors){
       return json({ ok:true, campania: cs[i] }, cors);
     }
 
-    // crear una campaña es cosa del dueño
+    /* Un cliente propone una compra grupal desde "Traelo por mí" cuando traerlo
+       solo sale caro. Entra con su reserva; si ya hay una abierta del mismo link,
+       se suma a esa en vez de duplicarla. Tope: 5 propuestas por IP por día. */
+    if (id === 'proponer'){
+      const texto = (v, n) => String(v || '').slice(0, n).trim();
+      const titulo = texto(cuerpo.titulo, 160);
+      const precioBase = Math.round(+cuerpo.precioBase);
+      const meta = Math.max(2, Math.min(200, parseInt(cuerpo.meta) || 10));
+      const tramos = (Array.isArray(cuerpo.tramos) ? cuerpo.tramos : []).slice(0, 8)
+        .map(t => ({ desde:Math.max(1, parseInt(t.desde) || 1), precio:Math.round(+t.precio) || 0, desc:Math.max(0, Math.min(90, parseInt(t.desc) || 0)) }))
+        .filter(t => t.precio > 0);
+      const r0 = (Array.isArray(cuerpo.reservas) && cuerpo.reservas[0]) || {};
+      const nombre = texto(r0.nombre, 80);
+      if (!titulo || !(precioBase > 0) || !tramos.length || !nombre) return json({ error:'faltan datos de la compra grupal' }, cors, 400);
+      const url = /^https?:\/\//i.test(cuerpo.itemRef || '') ? texto(cuerpo.itemRef, 600) : null;
+      const ahora = Date.now();
+      const reserva = { id:crypto.randomUUID().slice(0, 8), nombre, email:texto(r0.email, 120),
+        cantidad:Math.max(1, Math.min(999, parseInt(r0.cantidad) || 1)), precioAlReservar:tramos[0].precio, sena:0, ts:ahora };
+      const existente = url && cs.find(c => c.itemRef === url && c.estado === 'abierta' && c.cierra > ahora);
+      if (existente){
+        existente.reservas = existente.reservas || [];
+        existente.reservas.push(reserva);
+        await grabar(cs);
+        return json({ ok:true, campania:existente, existente:true }, cors);
+      }
+      const limite = `limite-camp:${new Date().toISOString().slice(0, 10)}:${req.headers.get('cf-connecting-ip') || 'sin-ip'}`;
+      const usadas = +(await env.NIJU.get(limite) || 0);
+      if (usadas >= 5) return json({ error:'Llegaste al límite de compras grupales propuestas de hoy. Probá mañana.' }, cors, 429);
+      await env.NIJU.put(limite, String(usadas + 1), { expirationTtl:90000 });
+      const c = { id:'cg-' + crypto.randomUUID().slice(0, 8), tipo:'grupal', origen:'cliente', titulo,
+        imagen:/^https:\/\//i.test(cuerpo.imagen || '') ? texto(cuerpo.imagen, 600) : null, itemRef:url, familiaId:null,
+        precioBase, meta, tramos, creada:ahora, cierra:ahora + 14 * 864e5, estado:'abierta', notas:texto(cuerpo.notas, 400), reservas:[reserva] };
+      cs.push(c);
+      await grabar(cs);
+      return json({ ok:true, campania:c }, cors);
+    }
+
+    // crear una campaña desde el Panel es cosa del dueño
     if (!esDueno(req, env)) return json({ error:'no autorizado' }, cors, 403);
     const c = {
       ...cuerpo,
@@ -1003,6 +1051,7 @@ const TIENDAS_CONOCIDAS = [
   [/(^|\.)ebay\./i,           'ebay',       'eBay',          'USD', 'internacional'],
   [/aliexpress\./i,           'aliexpress', 'AliExpress',    'USD', 'internacional'],
   [/alibaba\./i,              'alibaba',    'Alibaba',       'USD', 'internacional'],
+  [/made-in-china\./i,        'madeinchina', 'Made-in-China', 'USD', 'internacional'],
   [/1688\.com/i,              '1688',       '1688.com',      'CNY', 'internacional'],
   [/temu\./i,                 'temu',       'Temu',          'USD', 'internacional'],
   [/shein\./i,                'shein',      'SHEIN',         'USD', 'internacional'],
@@ -1226,35 +1275,40 @@ async function resolver(url, env, ctx, cors){
   const clave = new Request('https://cache.niju/resolver?u=' + encodeURIComponent(u.href));
   const cache = caches.default;
   const hit = await cache.match(clave);
-  if (hit) return hit;
+  if (hit) return desdeCache(hit, cors);
 
   const tienda = reconocerTienda(u.hostname);
-  let html = '';
-  try{
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), TIMEOUT);
-    const r = await fetch(u.href, { signal:ctrl.signal, redirect:'follow', headers:{
-      'user-agent':'Mozilla/5.0 (compatible; NiJuBot/0.1; +https://niju.ar/bot)',
-      'accept':'text/html,application/xhtml+xml',
-      'accept-language':'es-AR,es;q=0.9,en;q=0.8'
-    }});
-    clearTimeout(t);
-    if (r.status === 403 || r.status === 429 || r.status === 503 || r.status === 500){
-      return json({ ok:false, tienda, url:u.href, bloqueado:true,
-        error:`${tienda.nombre} no deja que un programa lea sus páginas.`,
-        sugerencia:'Copiá el título y el precio a mano: te cotizamos igual, con impuestos y gestión incluidos.' }, cors);
-    }
-    if (!r.ok) throw new Error('la tienda respondió ' + r.status);
-    html = (await r.text()).slice(0, 900000);
-  }catch(e){
-    return json({ ok:false, tienda, url:u.href,
-      error:'No pudimos leer esa página automáticamente.',
-      detalle:String(e.message || e),
-      sugerencia:'Cargá los datos a mano: con el título, el precio y la moneda alcanza para cotizarte la compra.' }, cors);
+  /* Primero como NiJu; si la tienda no entrega la ficha, como la pide WhatsApp
+     para armar la vista previa de un link (Amazon así da nombre y foto). */
+  let datos = null, v = null, bloqueado = false, detalle = '';
+  for (const ua of [UA_NIJU, UA_VISTA_PREVIA]){
+    try{
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), TIMEOUT);
+      const r = await fetch(u.href, { signal:ctrl.signal, redirect:'follow', headers:{
+        'user-agent':ua, 'accept':'text/html,application/xhtml+xml', 'accept-language':'es-AR,es;q=0.9,en;q=0.8'
+      }});
+      clearTimeout(t);
+      if (r.status === 403 || r.status === 429 || r.status === 503 || r.status === 500){ bloqueado = true; continue; }
+      if (!r.ok){ detalle = 'la tienda respondió ' + r.status; continue; }
+      const d = extraer((await r.text()).slice(0, 900000), u, tienda);
+      const vd = verificar(d, tienda);
+      /* Se queda con la lectura más completa: con precio > solo con nombre > nada */
+      const nota = x => x ? (x.ok ? 2 : x.confianza === 'parcial' ? 1 : 0) : -1;
+      if (nota(vd) > nota(v)){ datos = d; v = vd; }
+      if (v.ok) break;
+    }catch(e){ detalle = String(e.message || e); }
   }
 
-  const datos = extraer(html, u, tienda);
-  const v = verificar(datos, tienda);
+  if (!datos){
+    return json(bloqueado
+      ? { ok:false, tienda, url:u.href, bloqueado:true,
+          error:`${tienda.nombre} no deja que un programa lea sus páginas.`,
+          sugerencia:'Copiá el título y el precio a mano: te cotizamos igual, con impuestos y gestión incluidos.' }
+      : { ok:false, tienda, url:u.href,
+          error:'No pudimos leer esa página automáticamente.', detalle,
+          sugerencia:'Cargá los datos a mano: con el título, el precio y la moneda alcanza para cotizarte la compra.' }, cors);
+  }
   const res = json({ ok:v.ok, confianza: datos.aviso ? 'revisar' : v.confianza, tienda, ...datos, url:u.href,
                      error:v.ok ? null : v.error, sugerencia:v.ok ? null : v.sugerencia }, cors);
   if (v.ok) ctx.waitUntil(cache.put(clave, res.clone()));
@@ -1600,6 +1654,64 @@ const ADAPTADORES = {
   reebok:     shopify('reebok',     'www.reebok.com.ar',     [3,7]),
   timberland: shopify('timberland', 'www.timberland.com.ar', [3,7]),
   ansilta:    shopify('ansilta',    'www.ansilta.com.ar',    [3,8]),
+  salomon:    shopify('salomon',    'www.salomonstore.com.ar', [3,8]),
+
+  /* ---------- Marcas deportivas y de moda (sumadas el 14-09-2026) ----------
+     Probadas una por una: responden con precio y stock sin clave.
+     Nike, Adidas y Mishka bloquean (403); Zara, New Balance, Under Armour,
+     Dexter, Stockcenter, Merrell y The North Face no tienen catálogo abierto.
+     Rapsodia se descartó: su GraphQL devuelve el catálogo de Caro Cuore. */
+  asics:  vtex('asics', 'www.asics.com.ar', [3,7]),
+  fila:   vtex('fila', 'tienda.fila.com.ar', [3,7]),
+  levis:  vtex('levis', 'www.levi.com.ar', [3,7]),
+  lecoq:  woo('lecoq', 'lecoqsportif.com.ar', [3,8]),
+  kosiuko: magento('kosiuko', 'www.kosiuko.com', [3,8]),
+
+  /* ---------- Made-in-China: mayorista chino, precios FOB ----------
+     Sin API pública: se lee la página de búsqueda en español. Cada producto
+     trae rango de precio FOB en dólares y pedido mínimo (MOQ). Es precio de
+     fábrica puesto en el puerto chino: sin flete ni impuestos, que la app
+     suma con el desglose de importación. ---------------------------- */
+  madeinchina: {
+    modo:'catalogo-publico', plataforma:'html',
+    async buscar({ q, limite, desde = 0 }){
+      if (desde > 0) return [];      // la búsqueda pública no pagina de forma estable
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), TIMEOUT);
+      let html;
+      try{
+        const r = await fetch(`https://es.made-in-china.com/productSearch?keyword=${encodeURIComponent(q)}`, { signal:ctrl.signal, headers:{
+          'user-agent':'Mozilla/5.0 (compatible; NiJuBot/0.1; +https://niju.ar/bot)',
+          'accept':'text/html', 'accept-language':'es-AR,es;q=0.9' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status} en made-in-china.com`);
+        html = await r.text();
+      } finally { clearTimeout(t); }
+
+      const numero = s => parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+      const out = [];
+      for (const b of html.split('<div class="list-node ').slice(1)){
+        const titulo = limpiarTexto((b.match(/<h2 class="product-name"[^>]*title="([^"]+)"/) || [])[1]);
+        const url = (b.match(/<h2 class="product-name"[\s\S]*?href="([^"]+)"/) || [])[1];
+        const precio = b.match(/class="price">US\$\s*<span>([\d.,]+)<\/span>(?:\s*-\s*<span>([\d.,]+)<\/span>)?/);
+        if (!titulo || !url || !precio) continue;
+        const min = numero(precio[1]), max = precio[2] ? numero(precio[2]) : min;
+        if (!(min > 0)) continue;
+        const moq = limpiarTexto((b.match(/<div class="info">([^<]+)<span class="price_hint">\s*\(MOQ\)/) || [])[1]);
+        const pdid = (b.match(/pdid:([A-Za-z0-9]+)/) || [])[1] || url.split('_').pop();
+        out.push(oferta({
+          id:`madeinchina-${pdid}`, tiendaId:'madeinchina', titulo,
+          precio:min, precioLista:null, moneda:'USD', envio:0, entregaDias:[20,50],
+          stock:1, reputacion:4, url,
+          imagen:(b.match(/data-original="(https:\/\/image\.made-in-china\.com\/[^"]+)"/) || [])[1] || null,
+          vendedor:limpiarTexto((b.match(/class="compnay-name J-compnay-name"[^>]*>\s*<span>([^<]+)/) || [])[1]) || 'Made-in-China',
+          tags:['mayorista', 'precio FOB'],
+          specs:{ 'Precio FOB': max > min ? `US$ ${min} a ${max} por unidad` : `US$ ${min} por unidad`, ...(moq ? { 'Pedido mínimo': moq } : {}) }
+        }));
+        if (out.length >= limite) break;
+      }
+      return out;
+    }
+  },
 
   /* ---------- Coto: no usa VTEX, usa Endeca (plataforma vieja de Oracle).
      Devuelve JSON con foto real y precio. Dos trampas que hay que
@@ -1749,6 +1861,44 @@ function shopify(id, host, entregaDias){
           stock:5, reputacion:4.2,
           url: p.url ? `https://${host}${String(p.url).split('?')[0]}` : `https://${host}`,
           imagen: img, vendedor:id
+        }));
+      }
+      return out;
+    }
+  };
+}
+
+/* ------------------------------------------------------------------
+   Conector genérico de Magento 2 (Adobe Commerce).
+   Usa el GraphQL público de la tienda, el mismo que usa su web.
+   Magento no publica el stock por esta vía: muestra lo que la tienda
+   deja a la venta. El link del producto es url_key + url_suffix.
+   ------------------------------------------------------------------ */
+function magento(id, host, entregaDias){
+  return {
+    modo:'catalogo-publico', plataforma:'magento', host,
+    async buscar({ q, limite, desde = 0 }){
+      const porPagina = Math.min(limite, 24);
+      const pagina = Math.floor(desde / porPagina) + 1;
+      const consulta = `{products(search:${JSON.stringify(q)},pageSize:${porPagina},currentPage:${pagina}){items{` +
+        'name sku url_key url_suffix price_range{minimum_price{final_price{value currency} regular_price{value}}} small_image{url}}}}';
+      const d = await pedir(`https://${host}/graphql?query=${encodeURIComponent(consulta)}`,
+        { headers:{ 'accept':'application/json', 'user-agent':'NiJu/0.1 (+contacto@niju.ar)' } });
+      const out = [];
+      for (const p of (d?.data?.products?.items || [])){
+        const mp = p.price_range?.minimum_price;
+        const precio = mp?.final_price?.value;
+        if (!(precio > 0) || !p.url_key) continue;
+        const lista = mp?.regular_price?.value;
+        const listaCreible = lista > precio && lista <= precio * 3;
+        out.push(oferta({
+          id:`${id}-${p.sku}`, tiendaId:id,
+          titulo:String(p.name || '').trim(), marca:'',
+          precio, precioLista: listaCreible ? lista : null,
+          moneda:mp.final_price.currency || 'ARS', envio:0, entregaDias,
+          cuotas:0, cuotaValor:null, stock:5, reputacion:4.1,
+          url:`https://${host}/${p.url_key}${p.url_suffix ?? '.html'}`,
+          imagen:(p.small_image?.url || '').split('?')[0] || null, vendedor:id
         }));
       }
       return out;

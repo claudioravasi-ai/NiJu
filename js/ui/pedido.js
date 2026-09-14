@@ -19,7 +19,7 @@ import { comprobanteGestion, ALICUOTAS } from '../engine/facturacion.js';
 import { aPesos, aUSD, FX } from '../engine/fx.js';
 import { store } from '../state.js';
 import { foto, logoTienda, cargandoNiju, botonVolver } from './components.js';
-import { mismaIntencion } from '../engine/demanda.js';
+import { tokens } from '../engine/normalize.js';
 
 /* Pasos que NiJu se compromete a hacer por el cliente */
 const TRAMITES = [
@@ -54,6 +54,19 @@ function leerLink(u){
   const titulo = tramo ? tramo.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
   return { titulo, origen:DESDE_CHINA.test(host) ? 'china' : /amazon\.com$|ebay\.com$|walmart|bestbuy/i.test(host) ? 'eeuu' : null,
     tienda:{ nombre, tipo:/\.ar$/.test(host) ? 'nacional' : 'internacional', moneda:/\.ar$/.test(host) ? 'ARS' : 'USD' } };
+}
+
+/* ¿Lo que leyó el servidor es OTRO producto que el del link? Solo si no comparten
+   ni una palabra (Temu mostró "cinta selladora" para un link de impresora).
+   mismaIntencion() era demasiado exigente acá: el link de Amazon viene en inglés y
+   el título en español, y "WH-1000XM5" contaba como una palabra distinta de
+   "WH 1000XM5", así que se tiraban la foto y el precio de fichas correctas. */
+const palabras = s => new Set(tokens(s).flatMap(t => t.split(/[-/.+"]+/)).filter(t => t.length > 1));
+function esOtroProducto(delLink, leido){
+  const a = palabras(delLink), b = palabras(leido);
+  if (!a.size || !b.size) return false;
+  for (const t of a) if (b.has(t)) return false;
+  return true;
 }
 
 /* Hasta 25 segundos y un reintento: una red lenta del teléfono no es un error. */
@@ -100,12 +113,16 @@ export function vistaPedido(ir){
       /* Temu a veces responde con otra ficha (sus recomendados) en vez del producto
          del link: si el link trae el nombre y no se parece a lo leído, ese precio no se usa. */
       const delLink = leerLink(u).titulo;
-      if (d.ok && d.titulo && delLink && !mismaIntencion(delLink, d.titulo)){
-        Object.assign(d, { ok:false, error:'La tienda nos mostró un producto distinto al de tu link.',
+      const otro = d.titulo && delLink && esOtroProducto(delLink, d.titulo);
+      if (otro){
+        Object.assign(d, { ok:false, confianza:'nula', error:'La tienda nos mostró un producto distinto al de tu link.',
           sugerencia:'Abrí el producto en la tienda y completá el precio abajo: te cotizamos igual.' });
       }
+      /* Con nombre y foto pero sin precio legible, igual se muestra el producto
+         y el cliente escribe el precio al lado de la foto. */
+      d.leido = !!d.titulo && (d.ok || d.confianza === 'parcial');
       datos = d;
-      if (!d.ok || !d.titulo){
+      if (!d.leido){
         // El backend puede devolver un error técnico: al cliente le hablamos claro.
         const tecnico = !d.sugerencia;
         estado.replaceChildren(el('div', { class:'notice', style:{ marginBottom:'12px' } },
@@ -221,7 +238,7 @@ export function vistaPedido(ir){
     /* Del exterior: todo discriminado, etapa por etapa (ui/desglose.js).
        El panel se arma una vez por producto; si cambia el precio, se actualiza. */
     if (internacional){
-      const leido = datos?.ok && datos.titulo;
+      const leido = datos?.leido;
       const clave = leido ? `${form.url}|${form.titulo}` : `${form.url}|manual`;
       if (panel?.clave !== clave){
         panel = panelImportacion({ ir, alConfirmar:pedirImportacion, producto: leido
