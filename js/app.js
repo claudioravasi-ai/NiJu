@@ -4,7 +4,10 @@
 import { $, el, ic, toast, debounce, num } from './util.js';
 import { CONFIG } from './config.js';
 import { store, totalItems, registrarBusqueda } from './state.js';
-import { cargarCotizaciones, iniciarRefrescoFX, alCambiarFX, FX } from './engine/fx.js';
+import { cargarCotizaciones, iniciarRefrescoFX, alCambiarFX, FX, cotizacionVista, nombreCotizacion } from './engine/fx.js';
+import { vistaAyuda, vistaLegal, vistaNosotros, vistaGrandes } from './ui/info.js';
+import { campaniasCalculadas, leerPromosDueno, candidatos, miBeneficio } from './engine/promos.js';
+import { FUENTES } from './data/fuentes-fiscales.js';
 
 import { vistaHome } from './ui/home.js';
 import { vistaResultados } from './ui/resultados.js';
@@ -25,7 +28,7 @@ import { vistaMisCompras } from './ui/ordenes.js';
 import { modo, hayCuenta, refrescarPerfil } from './engine/nube.js';
 import { listarOrdenes } from './engine/ordenes.js';
 import { tiendasActivas } from './connectors/registry.js';
-import { logoTienda } from './ui/components.js';
+import { logoTienda, selectorDolar, selectorMoneda } from './ui/components.js';
 
 const NAV = [
   { ruta:'#/',          icono:'casa',     label:'Inicio' },
@@ -35,10 +38,14 @@ const NAV = [
   { ruta:'#/demanda',   icono:'megafono', label:'Pedí y que compitan' },
   { ruta:'#/grupal',    icono:'usuario',  label:'Compra grupal' },
   { ruta:'#/mayorista', icono:'caja',     label:'Por mayor' },
+  { ruta:'#/grandes',   icono:'mundo',    label:'Compras grandes' },
   { ruta:'#/mensajes',  icono:'chat',     label:'Mensajes' },
   { ruta:'#/carrito',   icono:'carrito',  label:'Carrito' },
   { ruta:'#/compras',   icono:'caja',     label:'Mis compras' },
   { ruta:'#/cuenta',    icono:'usuario',  label:'Mi cuenta' },
+  { ruta:'#/nosotros',  icono:'corazon',  label:'Quiénes somos' },
+  { ruta:'#/ayuda',     icono:'ayuda',    label:'Preguntas frecuentes' },
+  { ruta:'#/legal',     icono:'documento',label:'Términos y condiciones' },
   { ruta:'#/tiendas',   icono:'mundo',    label:'Conectores', privado:true },
   { ruta:'#/panel',     icono:'panel',    label:'Panel',      privado:true }
 ];
@@ -212,7 +219,8 @@ function construirShell(){
       el('button', { class:'iconbtn', title:'Carrito', onclick:() => ir('#/carrito') }, ic('carrito'),
         el('span', { class:'dot', data:{ badge:'top' }, hidden:true }, '0'))));
 
-  const main = el('main', { class:'main' }, topbar, el('div', { id:'vista' }));
+  pie = piePagina();
+  const main = el('main', { class:'main' }, topbar, el('div', { id:'vista' }), pie);
 
   /* El menú sin fijar arranca justo debajo de la cabecera. */
   const medirCabecera = () => document.documentElement.style.setProperty('--alto-cab', topbar.offsetHeight + 'px');
@@ -308,7 +316,7 @@ function actualizarFX(){
     const hora = FX.actualizado ? new Date(FX.actualizado).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }) : '';
     d.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px">
         <i style="width:6px;height:6px;border-radius:50%;background:${vivo ? 'var(--ok)' : 'var(--warn)'};display:inline-block"></i>
-        USD tarjeta <b style="color:var(--win-tx)">$${Math.round(FX.tarjeta)}</b></span>
+        ${nombreCotizacion()} <b style="color:var(--win-tx)">$${Math.round(FX[cotizacionVista()])}</b></span>
       <br><span style="opacity:.6">${vivo ? 'en vivo · ' + hora : 'sin conexión'}</span>`;
   });
 }
@@ -379,6 +387,10 @@ function rutear({ buscador }){
   } else if (ruta === '/panel' || ruta === '/tiendas'){
     if (!esDueno()){ vista.replaceChildren(vistaEntrar(ir)); }
     else vista.replaceChildren(ruta === '/panel' ? vistaPanel(ir) : vistaTiendas(ir));
+  } else if (ruta === '/ayuda'){    vista.replaceChildren(vistaAyuda(ir));
+  } else if (ruta === '/legal'){    vista.replaceChildren(vistaLegal(ir));
+  } else if (ruta === '/nosotros'){ vista.replaceChildren(vistaNosotros(ir));
+  } else if (ruta === '/grandes'){  vista.replaceChildren(vistaGrandes(ir));
   } else if (ruta === '/mensajes'){ vista.replaceChildren(vistaMensajes(ir));
   } else { vista.replaceChildren(vistaHome(ir)); }
 }
@@ -404,6 +416,87 @@ function pintarAvisos(n){
   document.querySelectorAll('[data-badge="avisos"]').forEach(b => { b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n); });
 }
 
+/* ------------------------------------------------------------------
+   Aviso al dueño: cuando una campaña se arma (una semana antes),
+   cuando arranca sola, y cuando un cliente alcanza un beneficio para
+   aprobar. Cada aviso sale una sola vez por dispositivo.
+   ------------------------------------------------------------------ */
+const CLAVE_AVISADOS = 'niju.avisosDueno';
+async function avisarDueno(){
+  if (!esDueno()) return;
+  let d;
+  try{ d = await leerPromosDueno(); }catch{ return; }     // el servidor todavía no tiene promociones
+  let vistos = {};
+  try{ vistos = JSON.parse(localStorage.getItem(CLAVE_AVISADOS) || '{}'); }catch{}
+  const cuando = f => f.toLocaleDateString('es-AR', { day:'numeric', month:'long' });
+
+  for (const c of campaniasCalculadas(d.campanias)){
+    const clave = `${c.id}:${c.estado}`;
+    if (vistos[clave]) continue;
+    if (c.estado === 'por-arrancar' && !c.decision) toast(`Se armó la campaña "${c.nombre}": arranca el ${cuando(c.inicio)}. Revisala en Panel → Campañas.`, 'win');
+    else if (c.estado === 'en-curso') toast(`Arrancó la campaña "${c.nombre}". Ya se ve en el cartel.`, 'win');
+    else continue;
+    vistos[clave] = Date.now();
+  }
+
+  try{
+    const pendientes = candidatos(await listarOrdenes({ dueno:true }), d.niveles, d.beneficios).filter(x => x.pendiente);
+    const clave = 'beneficios:' + pendientes.map(p => p.email + '>' + p.nivel.id).join('|');
+    if (pendientes.length && !vistos[clave]){
+      toast(`${pendientes.length === 1 ? 'Un cliente alcanzó' : `${pendientes.length} clientes alcanzaron`} un beneficio. Aprobalo en Panel → Campañas.`, 'win');
+      vistos[clave] = Date.now();
+    }
+  }catch{}
+  try{ localStorage.setItem(CLAVE_AVISADOS, JSON.stringify(vistos)); }catch{}
+}
+
+/* ------------------------------------------------------------------
+   Pie de página: todo lo que tiene que estar a mano en una tienda
+   argentina (derechos, arrepentimiento, datos personales, términos)
+   y los ajustes de cómo ver los precios.
+   ------------------------------------------------------------------ */
+let pie = null;
+function refrescarPie(){
+  if (!pie) return;
+  const nuevo = piePagina();
+  pie.replaceWith(nuevo);
+  pie = nuevo;
+}
+
+function piePagina(){
+  const enlace = (texto, ruta) => el('li', {}, el('button', { class:'pie-link', onclick:() => ir(ruta) }, texto));
+  const externo = (texto, url) => el('li', {}, el('a', { href:url, target:'_blank', rel:'noopener' }, texto));
+  const t = CONFIG.titular || {};
+  return el('footer', { class:'pie' }, el('div', { class:'pie-in' },
+    el('div', { class:'pie-cols' },
+      el('div', { class:'pie-marca' },
+        logoNiju('logo-rail'),
+        el('p', {}, 'Comprá todo, de todo y para todo. Comparamos en vivo y compramos por vos, con el precio final a la vista.'),
+        el('div', { class:'pie-ajustes' },
+          el('label', {}, 'Ver los dólares en', selectorDolar(),
+            el('small', {}, 'Cambia cómo ves la equivalencia. Una compra al exterior se calcula con lo que cuesta pagar afuera.')),
+          el('div', { class:'pie-ajustes-fila' }, el('span', { class:'tiny', style:{ fontWeight:'600', color:'var(--tx)' } }, 'Moneda principal'),
+            selectorMoneda(() => window.dispatchEvent(new Event('niju:dolar')))),
+          el('label', {}, 'Idioma', el('select', { 'aria-label':'Idioma' }, el('option', {}, 'Español (Argentina)'))))),
+      el('div', {}, el('h4', {}, 'Comprar'), el('ul', {},
+        enlace('Buscar en todas las tiendas', '#/buscar'), enlace('Traelo por mí', '#/pedido'), enlace('Compras grandes', '#/grandes'),
+        enlace('Compra grupal', '#/grupal'), enlace('Por mayor', '#/mayorista'), enlace('Pedí y que compitan', '#/demanda'))),
+      el('div', {}, el('h4', {}, 'Ayuda'), el('ul', {},
+        enlace('Preguntas frecuentes', '#/ayuda'), enlace('Mis compras', '#/compras'), enlace('Botón de arrepentimiento', '#/compras'),
+        enlace('Lo impositivo, resuelto', '#/impuestos'), enlace('Calculadora de importación', '#/impuestos?tab=calc'), enlace('Escribinos', '#/mensajes'))),
+      el('div', {}, el('h4', {}, 'NiJu'), el('ul', {},
+        enlace('Quiénes somos', '#/nosotros'), enlace('Más comprás, más ahorrás', '#/cuenta'), enlace('Términos y condiciones', '#/legal'),
+        enlace('Privacidad y datos personales', '#/legal'), enlace('Mi cuenta', '#/cuenta'))),
+      el('div', {}, el('h4', {}, 'Tus derechos'), el('ul', {},
+        externo('Defensa del Consumidor', FUENTES.consumidor.url), externo('Protección de datos personales', FUENTES.datos.url),
+        externo('ARCA', 'https://www.arca.gob.ar/'), externo('Envíos internacionales (ARCA)', FUENTES.envios.url)))),
+    el('div', { class:'pie-legal' },
+      el('span', {}, `© ${new Date().getFullYear()} NiJu. Todos los derechos reservados.`),
+      el('span', {}, 'Precios finales en pesos, con impuestos incluidos. Las marcas y fotos de productos pertenecen a sus dueños.'),
+      el('span', {}, t.razonSocial ? `${t.razonSocial} · CUIT ${t.cuit}` : 'Datos del titular y Data Fiscal de ARCA: se publican al completar la inscripción.'),
+      el('span', {}, `v${CONFIG.version}`))));
+}
+
 async function iniciar(){
   aplicarTema(temaGuardado() || 'auto');
   const ctx = construirShell();
@@ -416,10 +509,12 @@ async function iniciar(){
 
   await cargarCotizaciones();
   actualizarFX();
+  refrescarPie();          // el pie se armó antes de tener las cotizaciones en vivo
   iniciarRefrescoFX();
   alCambiarFX(() => {
     actualizarFX();
-    toast('Cotización actualizada: dólar tarjeta $' + Math.round(FX.tarjeta));
+    refrescarPie();
+    toast(`Cotización actualizada: ${nombreCotizacion().toLowerCase()} $${Math.round(FX[cotizacionVista()])}`);
     rutear(ctx);           // recalcula todos los precios con el cambio nuevo
   });
 
@@ -438,6 +533,13 @@ async function iniciar(){
   revisarAvisos();
   setInterval(revisarAvisos, 90 * 1000);
   window.addEventListener('niju:avisos', revisarAvisos);
+
+  /* Cambió el dólar o la moneda principal: se vuelven a pintar los precios. */
+  window.addEventListener('niju:dolar', () => { actualizarFX(); refrescarPie(); rutear(ctx); });
+
+  miBeneficio();                          // el beneficio aprobado del cliente, para el carrito
+  avisarDueno();
+  setInterval(avisarDueno, 30 * 60 * 1000);
 
   /* El service worker guarda la app para que ande sin internet. Buenísimo en
      producción, insoportable mientras desarrollamos: sirve archivos viejos.

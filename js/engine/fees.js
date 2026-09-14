@@ -154,13 +154,30 @@ export function calcularFee(o){
            pctEfectivo: valorUSD ? r2(fee / valorUSD * 100) : 0 };
 }
 
-/** Comparación honesta contra alternativas del mercado. */
+/** Comparación honesta contra alternativas del mercado.
+    Todas se miden con la misma vara: lo que cuesta el servicio en dólares
+    y ese costo dividido el valor del producto. Antes NiJu mostraba su
+    porcentaje con la logística adentro y las demás sin su cargo fijo:
+    13% contra 9% parecía caro aunque en dólares NiJu salía más barato.
+    Las alternativas son referencias de mercado cargadas acá, no
+    cotizaciones de empresas concretas. */
 export function comparadorDeFee(valorUSD){
   const niju = calcularFee({ valorUSD, tipo:'internacional' });
+  const tramo = TARIFARIO.internacional.tramos.find(t => valorUSD <= t.hasta);
+  const opcion = (quien, usd, datos) => ({ quien, usd:r2(usd), pct:valorUSD ? r2(usd / valorUSD * 100) : 0, ...datos });
   return [
-    { quien:'NiJu',                   pct:niju.pctEfectivo, usd:niju.feeUSD, destacar:true },
-    { quien:'Marketplace local',      pct:13.5, usd:r2(valorUSD * 0.135) },
-    { quien:'Casillero / forwarder',  pct:9.0,  usd:r2(valorUSD * 0.09 + 12) },
-    { quien:'Agente de compra CN',    pct:8.0,  usd:r2(valorUSD * 0.08 + 15) }
-  ];
+    opcion('NiJu', niju.feeUSD, { destacar:true,
+      formula:`${r2(tramo.pct * 100).toLocaleString('es-AR')}% del valor (mínimo US$ ${tramo.minUSD}) + US$ ${TARIFARIO.internacional.logisticaFijaUSD} de logística`,
+      hace:'Comprás en la app y pagás una sola vez en pesos. Nosotros compramos en la tienda, calculamos los impuestos antes, hacemos el trámite del courier y te lo llevamos.',
+      teToca:'Elegir el producto y recibirlo.' }),
+    opcion('Marketplace local', valorUSD * 0.135, { formula:'13,5% del valor',
+      hace:'Un vendedor del país que ya trajo el producto y lo vende con su margen incluido.',
+      teToca:'Pagar el precio que fija el vendedor.' }),
+    opcion('Casillero / forwarder', valorUSD * 0.09 + 12, { formula:'9% del valor + US$ 12 fijos',
+      hace:'Te da una dirección en el exterior y te reenvía el paquete.',
+      teToca:'Comprar y pagar vos en cada tienda de afuera, y revisar qué incluye su tarifa.' }),
+    opcion('Agente de compra en China', valorUSD * 0.08 + 15, { formula:'8% del valor + US$ 15 fijos',
+      hace:'Compra por vos en tiendas chinas.',
+      teToca:'Arreglar con el agente el envío internacional y los tiempos.' })
+  ].sort((a, b) => a.usd - b.usd);
 }

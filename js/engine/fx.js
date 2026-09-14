@@ -12,7 +12,7 @@ const REFRESCO_MS = 5 * 60 * 1000;
 
 /* Valores de referencia — solo se usan si no hay red. */
 const FALLBACK = {
-  oficial:1450, tarjeta:1885, mep:1520, blue:1500, cripto:1530,
+  oficial:1450, tarjeta:1885, mep:1520, blue:1500, cripto:1530, ccl:1510, mayorista:1420,
   cny:0.1385,   // 1 CNY en USD
   eur:1.08
 };
@@ -48,6 +48,8 @@ export async function cargarCotizaciones(){
       mep:     pick('bolsa')   || FALLBACK.mep,
       blue:    pick('blue')    || FALLBACK.blue,
       cripto:  pick('cripto')  || FALLBACK.cripto,
+      ccl:     pick('contadoconliqui') || FALLBACK.ccl,
+      mayorista: pick('mayorista') || FALLBACK.mayorista,
       cny: FALLBACK.cny, eur: FALLBACK.eur
     };
     Object.assign(FX, d, { origen:'vivo', actualizado:Date.now() });
@@ -72,8 +74,30 @@ export function aPesos(monto, moneda = 'USD', via = 'tarjeta'){
 }
 
 /** Un mismo importe, visto en las dos monedas. */
-export function dual(montoARS, via = 'tarjeta'){
-  const tc = via === 'oficial' ? FX.oficial : via === 'mep' ? FX.mep : FX.tarjeta;
+/* Con qué dólar se MUESTRAN los precios en dólares. Por defecto el
+   oficial; el cliente puede elegir otro en el pie de la app.
+   El costo de una compra al exterior NO cambia con esta elección: se
+   sigue calculando con lo que realmente cuesta pagar afuera. */
+export const COTIZACIONES = [
+  ['oficial', 'Dólar oficial'], ['tarjeta', 'Dólar tarjeta'], ['mep', 'Dólar MEP'],
+  ['ccl', 'Contado con liquidación'], ['blue', 'Dólar blue'], ['cripto', 'Dólar cripto'], ['mayorista', 'Dólar mayorista']
+];
+const CLAVE_VISTA = 'niju.dolarVista';
+let vista = 'oficial';
+try{ const v = localStorage.getItem(CLAVE_VISTA); if (COTIZACIONES.some(c => c[0] === v)) vista = v; }catch{}
+
+export const cotizacionVista = () => vista;
+export const nombreCotizacion = (id = vista) => (COTIZACIONES.find(c => c[0] === id) || COTIZACIONES[0])[1];
+export function usarCotizacion(id){
+  if (!COTIZACIONES.some(c => c[0] === id)) return;
+  vista = id;
+  try{ localStorage.setItem(CLAVE_VISTA, id); }catch{}
+  window.dispatchEvent(new Event('niju:dolar'));
+}
+
+/** Un mismo importe, visto en las dos monedas. */
+export function dual(montoARS, via = vista){
+  const tc = FX[via] || FX.oficial;
   return { ars: Math.round(montoARS), usd: Math.round(montoARS / tc * 100) / 100, tc: Math.round(tc) };
 }
 

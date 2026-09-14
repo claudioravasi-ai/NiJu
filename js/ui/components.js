@@ -5,7 +5,7 @@ import { el, plata, num, ic, estrellas } from '../util.js';
 import { STORE_BY_ID, TIPO_META } from '../data/stores.js';
 import { RUBRO_BY_ID } from '../data/catalog.js';
 import { esFavorito, alternarFavorito, store } from '../state.js';
-import { dual } from '../engine/fx.js';
+import { dual, FX, COTIZACIONES, cotizacionVista, nombreCotizacion, usarCotizacion } from '../engine/fx.js';
 import { plazoCorto } from '../engine/envios.js';
 
 /* ------------------------------------------------------------------
@@ -36,7 +36,14 @@ const sinFoto = () => el('div', { class:'foto-vacia' }, ic('imagen'), el('span',
    La moneda grande es la que el usuario eligió; la otra va abajo.
    ------------------------------------------------------------------ */
 /** A dónde va el pedido. De esto dependen los plazos de entrega. */
-export const destino = () => store.get('config')?.provincia || 'Buenos Aires';
+export const destino = () => store.get('usuario')?.domicilio?.provincia || store.get('config')?.provincia || 'Buenos Aires';
+
+/** Volver a la pantalla anterior. Si se entró directo (sin historia),
+    lleva al destino indicado. */
+export function botonVolver(ir, siNoHay = '#/'){
+  return el('button', { class:'v-volver', onclick:() => history.length > 1 ? history.back() : ir(siNoHay) },
+    ic('izq'), 'Volver');
+}
 
 export function precioDual(montoARS, opciones = {}){
   const { clase = 'price', color = '', internacional = false, nota = null } = opciones;
@@ -56,8 +63,16 @@ export function precioDual(montoARS, opciones = {}){
 
   return el('div', { style:{ display:'flex', flexDirection:'column', alignItems:'inherit' } },
     el('span', { class:clase, style:{ color } }, grande),
-    el('span', { class:'tiny dim mono', title:`Convertido al dólar tarjeta de hoy: $${d.tc}` }, chica,
+    el('span', { class:'tiny dim mono', title:`Convertido al ${nombreCotizacion().toLowerCase()} de hoy: $${d.tc}` }, chica,
       nota ? el('span', {}, ' · ' + nota) : null));
+}
+
+/** Menú para elegir con qué dólar ver los precios. */
+export function selectorDolar(){
+  return el('select', { class:'sel-dolar', 'aria-label':'Con qué dólar ver los precios',
+    onchange:e => usarCotizacion(e.target.value) },
+    ...COTIZACIONES.map(([id, nombre]) => el('option', { value:id, selected:cotizacionVista() === id || null },
+      `${nombre} · ${plata(FX[id])}`)));
 }
 
 /** Botón para cambiar la moneda principal. */
@@ -287,6 +302,16 @@ export function vacio(msg, sub){
     el('div', { style:{ fontSize:'42px', marginBottom:'10px' } }, '🔍'),
     el('h3', {}, msg),
     sub ? el('p', { class:'muted tiny', style:{ marginTop:'6px' } }, sub) : null);
+}
+
+/** Mientras carga una pantalla: la palabra NiJu se pinta de izquierda a
+    derecha y se borra de derecha a izquierda, en vaivén. */
+export function cargandoNiju(texto = 'Buscando el producto en todas las tiendas…'){
+  return el('div', { class:'cargando-niju', role:'status', 'aria-live':'polite' },
+    el('div', { class:'cargando-marca', 'aria-hidden':'true' },
+      el('span', { class:'cargando-base' }, 'Ni', el('b', {}, 'Ju')),
+      el('span', { class:'cargando-tinta' }, 'Ni', el('b', {}, 'Ju'))),
+    el('p', {}, texto));
 }
 
 export function esqueleto(n = 8){

@@ -15,7 +15,7 @@ import { consecuenciasFiscales, PERFILES } from '../engine/fiscal.js';
 import { aUSD, FX } from '../engine/fx.js';
 import { plazo, PROVINCIAS } from '../engine/envios.js';
 import { store, agregarAlCarrito } from '../state.js';
-import { logoTienda, tagTipo, selloOrigen, esqueleto, barraProgreso, vacio, precioDual, selectorMoneda, foto } from './components.js';
+import { logoTienda, tagTipo, selloOrigen, cargandoNiju, barraProgreso, vacio, precioDual, selectorMoneda, foto } from './components.js';
 import { precioReal, tablaPerfiles, mejorParaVos, conviendCambiar } from '../engine/precio-fiscal.js';
 import { analizar } from '../engine/historial.js';
 import { selectorVariantes } from './variantes.js';
@@ -31,7 +31,7 @@ export function vistaProducto(clave, ir){
   const porId = PRODUCTO_BY_ID[clave];
   const raiz = el('div', { class:'wrap' });
   const cont = el('div', { class:'section' });
-  cont.append(esqueleto(3));
+  cont.append(cargandoNiju());
   raiz.append(cont);
 
   const consulta = porId ? `${porId.marca} ${porId.n}` : decodeURIComponent(clave || '');

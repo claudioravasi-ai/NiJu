@@ -15,7 +15,8 @@ import { RUBROS } from '../data/catalog.js';
 import { STORE_BY_ID } from '../data/stores.js';
 import { tiendasActivas } from '../connectors/registry.js';
 import { buscar } from '../engine/search.js';
-import { FX } from '../engine/fx.js';
+import { FX, cotizacionVista, nombreCotizacion } from '../engine/fx.js';
+import { leerPromosPublicas, campaniasCalculadas } from '../engine/promos.js';
 import { foto, logoTienda, precioDual, destino } from './components.js';
 
 /* Qué se sale a buscar para llenar la vidriera. Una palabra por rubro
@@ -65,14 +66,32 @@ export function vistaHome(ir){
   const atajos = el('div', { class:'p-atajos' },
     atajo('mundo', `${nTiendas} tiendas en vivo`, 'Buscás una vez y comparamos todas',
       'Recorrer una tienda', () => window.dispatchEvent(new CustomEvent('niju:tiendas'))),
-    atajo('etiqueta', `Dólar tarjeta ${plata(FX.tarjeta)}`, FX.origen === 'vivo' ? 'Cotización en vivo, cada 5 minutos' : 'Última cotización disponible',
-      'Ver impuestos', () => ir('#/impuestos')),
+    atajo('etiqueta', `${nombreCotizacion()} ${plata(FX[cotizacionVista()])}`, FX.origen === 'vivo' ? 'Cotización en vivo, cada 5 minutos' : 'Última cotización disponible',
+      'Cambiar el dólar', () => document.querySelector('.pie .sel-dolar')?.scrollIntoView({ behavior:'smooth', block:'center' })),
     atajo('envio', `Envío a ${destino()}`, 'Plazos según tu destino, no promedios',
       'Cambiar destino', () => ir('#/cuenta')),
     atajo('caja', 'Un solo pago', 'Varias tiendas en un carrito: compramos por vos',
       'Ir al carrito', () => ir('#/carrito')));
 
-  raiz.append(el('div', { class:'p-top' }, el('div', { class:'wrap' }, banner, atajos)));
+  /* ---------- Cartel que corre: campañas del día y el lema ----------
+     Solo muestra campañas en curso que el dueño no frenó. Si el servidor
+     todavía no tiene la ruta de promociones, queda solo el lema. */
+  const cartel = el('div', { class:'p-cartel', 'aria-label':'Promociones de NiJu' });
+  const pintarCartel = (campanias = []) => {
+    const piezas = copia => [
+      ...campanias.map(c => el('button', { class:'p-cartel-item', style:`--cc:${c.color}`, tabindex:copia ? '-1' : null, 'aria-hidden':copia ? 'true' : null,
+        onclick:() => ir(`#/buscar?q=${encodeURIComponent(c.busqueda)}`) }, el('b', {}, c.titulo), c.texto, el('span', { class:'p-cartel-ver' }, 'Ver ofertas'))),
+      el('button', { class:'p-cartel-item lema', tabindex:copia ? '-1' : null, 'aria-hidden':copia ? 'true' : null, onclick:() => ir('#/cuenta') },
+        el('b', {}, 'Más comprás, más ahorrás'), 'Desde tu quinta compra pagada, beneficios que solo tienen los clientes frecuentes.',
+        el('span', { class:'p-cartel-ver' }, 'Ver mi progreso'))];
+    cartel.replaceChildren(el('div', { class:'p-cartel-pista' + (campanias.length ? '' : ' corta') }, ...piezas(false), ...piezas(true), ...piezas(true)));
+  };
+  pintarCartel();
+  leerPromosPublicas().then(d => {
+    if (d && raiz.isConnected) pintarCartel(campaniasCalculadas(d.campanias).filter(c => c.estado === 'en-curso'));
+  });
+
+  raiz.append(cartel, el('div', { class:'p-top' }, el('div', { class:'wrap' }, banner, atajos)));
 
   /* ---------- 3. Ofertas del día ---------- */
   const pistaOfertas = el('div', { class:'p-pista' }, ...Array.from({ length:6 }, esqueletoProd));

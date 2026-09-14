@@ -559,3 +559,12 @@ textarea.inp{ resize:vertical; min-height:80px; line-height:1.5; }
   .g-2,.g-3,.g-4{ grid-template-columns:1fr; }
   .g-auto{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
 }
+
+/* En el celular el buscador va en su propio renglón, a todo el ancho:
+   al lado del logo y los íconos quedaba reducido a un punto. */
+@media (max-width: 560px){
+  .topbar-in{ flex-wrap:wrap; row-gap:8px; padding-top:8px; padding-bottom:10px; }
+  .topbar-in .brand-movil{ margin-right:auto; }
+  .topbar-in .search{ order:10; flex:1 0 100%; max-width:none; padding:10px 14px; }
+  .topbar-in .search input{ font-size:16px; }   /* con menos de 16 px el iPhone hace zoom al tocar */
+}

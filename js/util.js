@@ -115,7 +115,9 @@ export function ic(nombre, cls = 'ic'){
     izq:'m15 18-6-6 6-6',
     der:'m9 18 6-6-6-6',
     tienda:'M3 9 4.5 4h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6',
-    refrescar:'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6'
+    refrescar:'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
+    ayuda:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',
+    documento:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 13h8M8 17h8M8 9h2'
   };
   const d = P[nombre] || P.x;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');

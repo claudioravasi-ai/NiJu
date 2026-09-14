@@ -331,3 +331,46 @@
   .v-card:hover .v-card-foto img{ transform:none; }
   .v-vivo i, .v-sk{ animation:none; }
 }
+
+/* En pantallas angostas la barra va en dos filas: Filtros y Ordenar arriba,
+   los filtros rápidos abajo a todo el ancho. En una sola fila se cortaban. */
+@media (max-width:900px){
+  .v-toolbar{ flex-wrap:wrap; row-gap:8px; }
+  .v-toolbar .v-chips{ order:3; flex:1 0 100%; }
+  .v-toolbar .v-orden{ margin-left:auto; }
+  .v-toolbar .v-orden select{ max-width:200px; }
+}
+
+/* Buscar sin palabra: inicio de búsqueda */
+.v-inicio{ padding:18px 0 30px; }
+.v-inicio-hero{
+  margin:8px 0 18px; padding:clamp(22px, 4vw, 38px); border-radius:var(--r-lg); color:#fff;
+  background:radial-gradient(circle at 85% 20%, rgba(255,255,255,.18), transparent 40%), linear-gradient(120deg, #1f55cc, #3483fa 60%, #62a6ff);
+}
+.v-inicio-hero h1{ color:#fff; font-size:clamp(26px, 3.6vw, 40px); font-weight:700; letter-spacing:-.02em; margin-bottom:6px; }
+.v-inicio-hero p{ opacity:.95; margin-bottom:16px; }
+.v-inicio-buscar{
+  display:flex; align-items:center; gap:8px; max-width:720px; padding:6px 6px 6px 16px;
+  border-radius:var(--r-pill); background:#fff; box-shadow:0 10px 30px rgba(0,0,0,.22);
+}
+.v-inicio-buscar > .ic{ width:20px; height:20px; flex:0 0 20px; color:#3483fa; }
+.v-inicio-buscar input{ flex:1; min-width:0; padding:10px 0; border:0; outline:0; background:none; color:#333; font-size:16px; }
+.v-inicio-buscar button{ padding:11px 22px; border:0; border-radius:var(--r-pill); background:#1f1f1f; color:#fff; font-size:15px; font-weight:700; cursor:pointer; white-space:nowrap; }
+.v-inicio h2{ font-size:18px; font-weight:600; margin:18px 0 10px; }
+.v-inicio .k2-chips .v-chip{ font-size:14px; padding:8px 14px; }
+.v-inicio-cats{ display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:10px; }
+@media (max-width:560px){
+  .v-inicio-buscar{ flex-wrap:wrap; padding:8px; border-radius:var(--r-lg); }
+  .v-inicio-buscar input{ flex-basis:calc(100% - 40px); }
+  .v-inicio-buscar button{ width:100%; }
+}
+
+/* La fila de filtros rápidos se desliza con el dedo: un degradado en el
+   borde derecho avisa que hay más, para que no parezca cortada. */
+@media (max-width:900px){
+  .v-toolbar .v-chips{
+    -webkit-mask-image:linear-gradient(90deg, #000 85%, transparent);
+            mask-image:linear-gradient(90deg, #000 85%, transparent);
+    padding-right:28px;
+  }
+}

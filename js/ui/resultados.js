@@ -15,6 +15,8 @@ import { tiendasActivas } from '../connectors/registry.js';
 import { store, registrarBusqueda } from '../state.js';
 import { filaCluster, vacio, selectorMoneda, logoTienda, foto } from './components.js';
 import { tarjetaResultado, esqueletoGrilla, descuentoDe, cargaInfinita, selectorVista, vistaGuardada } from './vitrina.js';
+import { esDueno } from '../engine/sesion.js';
+import { RUBROS } from '../data/catalog.js';
 
 const ORDENES = [
   { id:'relevancia', n:'Más relevantes' },
@@ -31,6 +33,10 @@ export function vistaResultados(params, ir){
   const q     = params.get('q') || '';
   const rubro = params.get('rubro') || null;
   const soloTienda = params.get('tienda') || null;
+
+  /* Sin palabra, sin rubro y sin tienda no hay nada que preguntarles a las
+     tiendas: antes salía "0 resultados · Ninguna tienda tiene \"\"". */
+  if (!q && !rubro && !soloTienda && params.get('mayorista') !== '1') return inicioBusqueda(ir);
 
   const filtros = {
     tipos: new Set(),
@@ -366,6 +372,30 @@ export function vistaResultados(params, ir){
   return raiz;
 }
 
+const LO_MAS_BUSCADO = ['zapatillas', 'air fryer', 'notebook', 'smart tv', 'perfume', 'celular', 'taladro', 'aceite de girasol'];
+
+/** Buscar sin palabra: buscador grande, lo más buscado, tus últimas
+    búsquedas y las categorías. */
+function inicioBusqueda(ir){
+  const input = el('input', { type:'search', enterkeyhint:'search', placeholder:'¿Qué estás buscando?', 'aria-label':'Qué estás buscando' });
+  const buscarAhora = texto => { const t = (texto ?? input.value).trim(); if (t) ir(`#/buscar?q=${encodeURIComponent(t)}`); };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') buscarAhora(); });
+  const recientes = (store.get('historial') || []).map(h => typeof h === 'string' ? h : h?.q).filter(Boolean).slice(0, 6);
+  const chips = lista => el('div', { class:'k2-chips' }, ...lista.map(t => el('button', { class:'v-chip', onclick:() => buscarAhora(t) }, t)));
+  setTimeout(() => input.focus({ preventScroll:true }), 50);
+
+  return el('div', { class:'wrap v-inicio' },
+    el('section', { class:'v-inicio-hero' },
+      el('h1', {}, '¿Qué buscás hoy?'),
+      el('p', {}, 'Lo buscamos en todas las tiendas a la vez y te mostramos dónde sale más barato, con el precio final a la vista.'),
+      el('div', { class:'v-inicio-buscar' }, ic('buscar'), input, el('button', { onclick:() => buscarAhora() }, 'Buscar'))),
+    recientes.length ? [el('h2', {}, 'Tus últimas búsquedas'), chips(recientes)] : null,
+    el('h2', {}, 'Lo más buscado'), chips(LO_MAS_BUSCADO),
+    el('h2', {}, 'O entrá por categoría'),
+    el('div', { class:'v-inicio-cats' }, ...RUBROS.map(r => el('button', { class:'p-cat', style:`--rc:${r.color}`, onclick:() => ir(`#/buscar?rubro=${r.id}`) },
+      el('span', { class:'p-cat-ic' }, r.emo), el('b', {}, r.nombre)))));
+}
+
 const textoRango = (min, max) =>
   min && max ? `${plata(min)} a ${plata(max)}` : max ? `Hasta ${plata(max)}` : `Más de ${plata(min)}`;
 
@@ -424,7 +454,7 @@ function sinResultados(datos, q, ir, rubro){
     meta ? el('p', { class:'tiny dim', style:{ marginBottom:'14px' } },
       `Consultamos ${meta.tiendasOk} de ${meta.tiendasTotal} tiendas.`) : null,
 
-    hayFiltros ? null : el('div', { class:'notice notice-bad', style:{ textAlign:'left', maxWidth:'640px', margin:'0 auto 20px' } },
+    hayFiltros || !esDueno() ? null : el('div', { class:'notice notice-bad', style:{ textAlign:'left', maxWidth:'640px', margin:'0 auto 20px' } },
       el('b', {}, 'Ojo: las tiendas internacionales todavía no están buscando de verdad. '),
       'Amazon, eBay, AliExpress y las demás están en modo demostración: simulan precios sobre una lista corta de productos, ' +
       'así que no pueden encontrar cualquier cosa. Para que busquen en serio hay que cargarles su clave ' +

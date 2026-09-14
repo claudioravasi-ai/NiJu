@@ -16,6 +16,7 @@ import { salir } from '../engine/sesion.js';
 import { vistaOportunidades } from './oportunidades.js';
 import { vistaOperacion } from './ordenes.js';
 import { FX } from '../engine/fx.js';
+import { vistaCampanias } from './campanias.js';
 
 /* Confirmación de salida dentro de la app. Antes usaba confirm() del
    navegador: si el navegador bloquea esos cuadros (o la app instalada
@@ -37,11 +38,11 @@ export function confirmarSalida(){
 export function vistaPanel(ir){
   const raiz = el('div', { class:'wrap' });
   const cuerpo = el('div');
-  let tab = 'resumen';
+  let tab = new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'resumen';
 
   const tabs = el('div', { class:'tabs' },
     ...[['resumen','Resumen'],['operacion','Órdenes para comprar'],['radar','Radar de oportunidades'],
-        ['productos','Mis productos'],['marketing','Marketing automático'],
+        ['productos','Mis productos'],['marketing','Marketing automático'],['campanias','Campañas y beneficios'],
         ['contable','Contabilidad ARCA'],['tarifas','Tarifario']]
       .map(([id, n]) => el('button', { class:'tab' + (tab === id ? ' on' : ''), onclick:e => {
         tab = id; [...tabs.children].forEach(c => c.classList.remove('on')); e.currentTarget.classList.add('on'); pintar();
@@ -71,6 +72,7 @@ export function vistaPanel(ir){
       tab === 'radar'     ? vistaOportunidades(ir) :
       tab === 'productos' ? productos(pintar) :
       tab === 'marketing' ? marketing() :
+      tab === 'campanias' ? vistaCampanias() :
       tab === 'contable'  ? contable() : tarifas());
   }
   pintar();

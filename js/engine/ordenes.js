@@ -168,6 +168,37 @@ export async function listarOrdenes({ dueno = false } = {}){
   return os.slice().sort((a, b) => b.creada - a.creada);
 }
 
+/* Estados en los que el pago ya se acreditó. Recién ahí la compra existe
+   para la carpeta fiscal y para los totales del cliente: un pedido
+   pendiente de pago no se compró todavía, y uno cancelado se devuelve. */
+const COBRADAS = ['pagada', 'comprando', 'consultando', 'preparando', 'en_deposito', 'enviada', 'entregada'];
+export const estaPagada = o => COBRADAS.includes(o?.estado);
+
+/** Las compras del cliente listas para la carpeta fiscal (solo pagadas,
+    con número de pedido y fecha de pago) y los pedidos que no cuentan.
+    El detalle fiscal (IVA de la gestión, régimen, dólares) se toma de lo
+    que se anotó al confirmar; el total y el estado, de la orden. */
+export async function comprasDelCliente(){
+  const ordenes = await listarOrdenes();
+  const anotado = new Map((store.get('comprasAnio') || []).filter(c => c.ordenId).map(c => [c.ordenId, c]));
+  const pagadas = ordenes.filter(estaPagada).map(o => {
+    const d = anotado.get(o.id) || {};
+    const tramos = o.tramos || [];
+    const lineas = tramos.flatMap(t => t.lineas || []);
+    return {
+      ordenId:o.id, estado:o.estado,
+      fecha:o.pagoConfirmado?.ts || o.creada || Date.now(),
+      titulo:d.titulo || (lineas.map(l => l.titulo).slice(0, 2).join(' + ') + (lineas.length > 2 ? ` +${lineas.length - 2}` : '')),
+      tienda:d.tienda || [...new Set(tramos.map(t => t.tienda))].join(', '),
+      tipo:d.tipo || (tramos.some(t => t.tipo === 'internacional') ? 'internacional' : 'nacional'),
+      regimen:d.regimen || null,
+      totalARS:o.totalARS ?? d.totalARS ?? 0,
+      ivaFeeARS:d.ivaFeeARS || 0, valorUSD:d.valorUSD || 0, destino:d.destino || 'uso'
+    };
+  });
+  return { pagadas, pendientes:ordenes.filter(o => o.estado === 'pendiente_pago'), ordenes };
+}
+
 export async function guardarOrden(o){
   if (await modoOError() === 'nube'){
     return (await llamar('/ordenes/' + encodeURIComponent(o.id), { metodo:'PUT', cuerpo:{ orden:o }, comoDueno:true })).orden;

@@ -47,6 +47,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers:{ ...cors, 'Access-Control-Allow-Methods':'GET,POST,PUT,OPTIONS' } });
     if (url.pathname === '/v1/admin/verificar')   return verificarAdmin(req, env, cors);
     if (url.pathname.startsWith('/v1/campanias')) return campanias(req, url, env, cors);
+    if (url.pathname.startsWith('/v1/promos'))    return promos(req, url, env, cors);
     if (url.pathname.startsWith('/v1/demanda'))   return demanda(req, url, env, cors);
 
     try{
@@ -172,7 +173,7 @@ const secretoSesion = env => env.SESION_SECRETO || env.ADMIN_TOKEN || '';
 
 function estadoServidor(env, cors){
   return json({
-    ok:true, version:2,
+    ok:true, version:3, promos:true,
     base: !!env.NIJU,
     cuentas: !!(env.NIJU && secretoSesion(env)),
     emails: !!(env.RESEND_API_KEY && env.AVISOS_DESDE)
@@ -623,6 +624,47 @@ async function variantesWoo(host, id){
       (attr(x.name)?.terms || []).find(t => t.slug === x.value)?.name || x.value ]))
   }));
   return { opciones:attrs.map(a => ({ nombre:a.name, valores:(a.terms || []).map(t => t.name) })), skus };
+}
+
+/* ============================================================
+   PROMOCIONES: campañas por fecha y beneficios por cliente
+   Las campañas las calcula la app con el calendario; acá se guarda
+   solo lo que decide el dueño (aprobar, frenar, editar) y los
+   beneficios que otorgó a cada cliente.
+     GET /v1/promos        público: campañas y niveles, sin datos de clientes
+     GET /v1/promos/yo     cliente con sesión: solo su beneficio
+     GET /v1/promos/todo   dueño: todo
+     PUT /v1/promos        dueño: guarda todo
+   ============================================================ */
+async function promos(req, url, env, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU' }, h, 501);
+  const parte = url.pathname.split('/').filter(Boolean)[2] || '';
+  const leer = async () => ({ campanias:{}, niveles:null, beneficios:{}, ...((await leerKV(env, 'promos')) || {}) });
+
+  if (req.method === 'GET' && !parte){
+    const d = await leer();
+    return json({ campanias:d.campanias, niveles:d.niveles }, h);
+  }
+  if (req.method === 'GET' && parte === 'yo'){
+    const cliente = await clienteDe(req, env);
+    if (!cliente) return json({ error:'Entrá con tu cuenta.' }, h, 401);
+    const d = await leer();
+    return json({ beneficio:d.beneficios[cliente.email] || null }, h);
+  }
+
+  if (!esDueno(req, env)) return json({ error:'no autorizado' }, h, 403);
+  if (req.method === 'GET' && parte === 'todo') return json(await leer(), h);
+  if (req.method === 'PUT' && !parte){
+    const c = await req.json().catch(() => null);
+    if (!c || typeof c !== 'object') return json({ error:'datos inválidos' }, h, 400);
+    const d = { campanias:c.campanias || {}, niveles:Array.isArray(c.niveles) ? c.niveles : null,
+                beneficios:c.beneficios || {}, actualizado:Date.now() };
+    if (JSON.stringify(d).length > 300000) return json({ error:'demasiados datos' }, h, 413);
+    await grabarKV(env, 'promos', d);
+    return json({ ok:true, ...d }, h);
+  }
+  return json({ error:'método no permitido' }, h, 405);
 }
 
 async function campanias(req, url, env, cors){

@@ -19,6 +19,7 @@ import { asegurarCuenta } from './cuenta.js';
 import { necesitaTalle } from './variantes.js';
 import { nombreFactura, nombreCompleto, domicilioTexto, formatoCuit } from '../engine/perfil.js';
 import { PERFILES } from '../engine/fiscal.js';
+import { tarjetaAsistente } from './asistente.js';
 
 export function vistaCarrito(ir){
   const raiz = el('div', { class:'wrap' });
@@ -112,6 +113,14 @@ export function vistaCarrito(ir){
       resumen.detalleAsistida = fa;
     }
 
+    /* Más comprás, más ahorrás: el beneficio que aprobó NiJu se aplica
+       sobre la gestión, nunca sobre el precio de la tienda. */
+    const beneficio = store.get('beneficio');
+    if (beneficio?.pct > 0 && resumen.fee > 0){
+      resumen.descuentoBeneficio = Math.round(resumen.fee * beneficio.pct / 100);
+      resumen.fee -= resumen.descuentoBeneficio;
+    }
+
     const perfilId = store.get('usuario')?.perfilFiscal || 'consumidor_final';
     const comp = comprobanteGestion({ feeARS:resumen.fee, incluyeIVA:true, condicion:perfilId,
       jurisdiccion:store.get('config').provincia,
@@ -169,6 +178,8 @@ export function vistaCarrito(ir){
         comp.condicion === 'responsable_inscripto'
           ? [fila('Gestión NiJu (neto)', comp.neto), fila(`IVA ${(ALICUOTAS.iva*100).toFixed(0)}%`, comp.iva)]
           : fila('Gestión NiJu', comp.total, 'IVA incluido'),
+        resumen.descuentoBeneficio ? el('div', { class:'notice notice-ok', style:{ margin:'6px 0' } },
+          el('b', {}, `Sos ${beneficio.nombre}: `), `ya te descontamos ${plata(resumen.descuentoBeneficio)} (${beneficio.pct}% de la gestión).`) : null,
         costoEntrega ? fila('Entrega', costoEntrega) : null,
         descPago ? fila('Descuento por transferencia', descPago) : null,
         el('div', { class:'cost-line total' }, el('span', {}, 'Total'), el('b', {}, plata(total))),
@@ -189,7 +200,7 @@ export function vistaCarrito(ir){
       el('div', { class:'row-b', style:{ marginBottom:'14px' } },
         el('div', {}, el('div', { class:'kicker' }, 'Una sola compra, todas las tiendas'), el('h2', {}, 'Tu carrito')),
         el('button', { class:'btn btn-sm', onclick:() => { store.set('carrito', []); pintar(); } }, 'Vaciar')),
-      el('div', { class:'pdp' }, el('div', {}, ...grupos), panel));
+      el('div', { class:'pdp' }, el('div', {}, tarjetaAsistente({ ir, resumen, alCambiar:pintar }), ...grupos), panel));
   }
 
   pintar();
