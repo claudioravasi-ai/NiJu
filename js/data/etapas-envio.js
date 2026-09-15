@@ -111,6 +111,17 @@ export const OPERADORES = [
     calcular:({ pesoKg }) => ({ internacionalUSD:Math.max(1, pesoKg) * 18,
       detalleInternacional:`${Math.max(1, pesoKg).toLocaleString('es-AR')} kg × US$ 18, tope del rango publicado para exprés` }) },
 
+  /* Pedido de Claudio (15-09-2026): un producto de más de 50 kg no lo manda la
+     tienda por correo como si fuera ropa. soloCarga:true = aparece únicamente
+     cuando no puede ir como pequeño envío (peso, valor, unidades o para vender). */
+  { id:'carga-aerea', carga:true, soloCarga:true, empresa:'Agente de carga aérea', servicio:'Carga aérea consolidada, con despachante',
+    publica:'desde', url:null, plazo:null,
+    condiciones:'Los agentes de carga no publican tarifa fija: cotizan cada embarque por kilo o por volumen, el mayor. Usamos la referencia publicada de carga aérea para el origen elegido.',
+    calcular:({ pesoKg, origen }) => {
+      const r = referencia(origen === 'china' ? 'fleteChinaCarga' : 'fleteAereo', { pesoKg });
+      return { internacionalUSD:r.valor, detalleInternacional:`referencia de ${r.fuente.titulo.split(' — ')[0]}: ${r.detalle}` };
+    } },
+
   { id:'fedex', empresa:'FedEx', servicio:'Courier internacional', publica:false,
     url:'https://www.fedex.com/es-ar/shipping/rates.html', condiciones:'Cotiza cada envío en su web según origen, peso y medidas.' },
   { id:'ups', empresa:'UPS', servicio:'Courier internacional', publica:false,
@@ -147,6 +158,47 @@ const TCA_FLAT = [[5, 52.31], [10, 71.14], [20, 103.14], [50, 149.93], [100, 205
 
 /* Correo Argentino, Encomienda Clásica: hasta kg → [regional, nacional], en pesos. */
 const CORREO_CLASICA = [[1, 19500, 26400], [5, 23100, 32000], [10, 31100, 45200], [15, 38200, 56600], [20, 45100, 65800], [25, 54200, 80900]];
+
+/* Correr SA, encomiendas de 25 a 50 kg, IVA incluido, vigente desde el 01-07-2026:
+   hasta kg → [Entre Ríos, Rosario y Santa Fe capital; Buenos Aires e interior de Santa Fe]. */
+const CORRER = [[25, 38500, 49500], [30, 46000, 62000], [35, 54000, 72000], [40, 61500, 83000], [45, 69000, 93000], [50, 85000, 114000]];
+const CORRER_URL = 'https://corrersa.com/tarifas/';
+/* Arriba de 50 kg nadie publica precio: los expresos cotizan por kilo o m³ y distancia.
+   Se estima con el precio por kilo de la banda más pesada de Correr (114.000 / 50 kg). */
+const POR_KILO_ESTIMADO = 114000 / 50;
+
+/* Factor de peso volumétrico (largo × ancho × alto en cm ÷ factor). Andreani
+   usa 4.000 o 5.000 según la modalidad y Correo Argentino 6.000: tomamos 5.000. */
+export const FACTOR_VOLUMETRICO = 5000;
+export const pesoFacturable = (pesoKg, medidasCm, unidades = 1) => {
+  const [l, a, h] = medidasCm || [];
+  const vol = l > 0 && a > 0 && h > 0 ? l * a * h / FACTOR_VOLUMETRICO * unidades : 0;
+  return Math.max(pesoKg || 0, vol);
+};
+
+/* ---------- Transportes dentro del país, de la Aduana a tu casa ----------
+   Consultados el 15-09-2026. Cruz del Sur y Vía Cargo cotizan en su web con
+   verificación reCAPTCHA: la app no puede pedirles el precio sola, así que se
+   muestran con su link y los datos que te van a pedir. */
+export const TRANSPORTES_NACIONALES = [
+  { nombre:'Correo Argentino', zona:'Todo el país', hasta:25, cobra:'Encomienda Clásica: tarifa publicada por peso y zona.',
+    url:'https://www.correoargentino.com.ar/servicios/paqueteria/encomienda-correo-clasica' },
+  { nombre:'Correr SA', zona:'Buenos Aires, Santa Fe y Entre Ríos', hasta:50, rx:/buenos aires|caba|capital|santa fe|entre r[ií]os/i,
+    cobra:'Tarifa publicada hasta 50 kg, IVA incluido.', url:CORRER_URL },
+  { nombre:'Andreani', zona:'Todo el país', hasta:50, cobra:'Cotiza por el mayor entre el peso real y el volumétrico.', url:'https://www.andreani.com/' },
+  { nombre:'Cruz del Sur', zona:'Todo el país, sin límite de peso', hasta:Infinity,
+    cobra:'Cotizador en su web: pide medidas, peso, provincia de origen y de destino y valor declarado.', url:'https://www.cruzdelsur.com/herramientas_cotizaciones_particulares.php' },
+  { nombre:'Vía Cargo', zona:'Todo el país', hasta:Infinity, cobra:'Cotizador en su web.', url:'https://viacargo.com.ar/cotizar-envio/' },
+  { nombre:'Expreso Oro Negro', zona:'Patagonia', hasta:Infinity, rx:/neuqu[eé]n|r[ií]o negro|chubut|santa cruz|tierra del fuego|la pampa/i,
+    cobra:'Por kilo o por m³, el que corresponda, más un porcentaje de seguro sobre el valor declarado, el retiro si lo pedís e IVA.', url:'http://expresooronegro.com/preguntas-frecuentes.php' },
+  { nombre:'Transporte Vesprini', zona:'Patagonia', hasta:Infinity, rx:/neuqu[eé]n|r[ií]o negro|chubut|santa cruz|tierra del fuego|la pampa/i,
+    cobra:'Cargas generales: cotiza cada envío.', url:'https://www.transportevesprini.com.ar/' }
+];
+
+/** Los transportes que llegan a esa provincia con ese peso; primero los de la zona. */
+export const transportesPara = (pesoKg, provincia = '') => TRANSPORTES_NACIONALES
+  .filter(t => pesoKg <= t.hasta && (!t.rx || t.rx.test(provincia)))
+  .sort((a, b) => (b.rx?.test(provincia) || 0) - (a.rx?.test(provincia) || 0));
 
 export const REFERENCIAS = {
   origenUSD:{
@@ -205,7 +257,19 @@ export const REFERENCIAS = {
     url:'https://www.correoargentino.com.ar/servicios/paqueteria/encomienda-correo-clasica',
     calcular:({ pesoKg, provincia }) => {
       const t = CORREO_CLASICA.find(([kg]) => pesoKg <= kg);
-      if (!t) return null;
+      const kg = Math.ceil(pesoKg).toLocaleString('es-AR');
+      if (!t){
+        const c = CORRER.find(([hasta]) => pesoKg <= hasta);
+        const litoral = /entre r[ií]os|rosario/i.test(provincia || '');
+        const cubre = /buenos aires|caba|capital|santa fe|entre r[ií]os/i.test(provincia || '');
+        if (c) return { valor:litoral ? c[1] : c[2], sello:cubre ? 'publicada' : 'referencia',
+          fuente:{ titulo:'Correr SA — tarifas de encomiendas (01-07-2026)', url:CORRER_URL },
+          detalle: cubre ? `Correr SA, encomienda hasta ${c[0]} kg, IVA incluido, hasta ${provincia}`
+            : `referencia: Correr SA hasta ${c[0]} kg para Buenos Aires (no llega a ${provincia}); un expreso a tu provincia puede cobrar más` };
+        return { valor:Math.round(pesoKg * POR_KILO_ESTIMADO / 100) * 100, sello:'referencia',
+          fuente:{ titulo:'Correr SA — tarifas de encomiendas (01-07-2026)', url:CORRER_URL },
+          detalle:`estimado: ${kg} kg × $ ${Math.round(POR_KILO_ESTIMADO).toLocaleString('es-AR')}, el precio por kilo de la encomienda de 50 kg de Correr SA. Arriba de 50 kg ningún transporte publica tarifa: cotizan por kilo o m³ y distancia, y en cargas grandes el kilo suele salir menos. Tomalo como techo` };
+      }
       const regional = /buenos aires|caba|capital/i.test(provincia || '');
       return { valor:regional ? t[1] : t[2], detalle:`Encomienda Clásica hasta ${t[0]} kg, tarifa ${regional ? 'regional' : 'nacional'}, hasta ${provincia}` };
     }
@@ -238,5 +302,5 @@ export const CIUDAD_CHINA_BY_ID = Object.fromEntries(CIUDADES_CHINA.map(c => [c.
 export function referencia(id, datos){
   const R = REFERENCIAS[id];
   const r = R?.calcular(datos);
-  return r ? { ...r, sello:R.sello, fuente:{ titulo:R.titulo, url:R.url } } : null;
+  return r ? { sello:R.sello, fuente:{ titulo:R.titulo, url:R.url }, ...r } : null;
 }

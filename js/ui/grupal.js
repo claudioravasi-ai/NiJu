@@ -2,14 +2,22 @@
    NiJu — Compra grupal y preventa (vista pública)
    Cuanta más gente se suma, más barato para todos. El cliente
    invita porque le conviene: el marketing lo hacen ellos.
+   Cada día se ve cuántas unidades se pidieron y cuántas personas
+   hay; cada una da su OK, y si todas están de acuerdo el pedido
+   se cierra antes de los 12 días.
    ============================================================ */
 import { el, plata, num, ic, toast, fecha, hoja } from '../util.js';
 import { campanias, estadoCampania, reservar, resultadoCampania, SENA_PCT, crearCampania, sincronizar, estadoSync,
-  pendiente, olvidarPendiente, campaniaPara, proponerCampania } from '../engine/grupal.js';
+  pendiente, olvidarPendiente, campaniaPara, proponerCampania, tramosDesdeCurva, avancePorDia, esMia, darOk,
+  DIAS_CAMPANIA, MIN_PERSONAS_ACUERDO } from '../engine/grupal.js';
 import { FAMILIAS } from '../data/nicho-maquinas.js';
 import { store } from '../state.js';
 import { esDueno } from '../engine/sesion.js';
 import { foto } from './components.js';
+
+/* Nombre y la inicial del apellido: los demás participantes no ven el nombre completo. */
+const nombreCorto = n => { const [a = '', b] = String(n || '').trim().split(/\s+/); return b ? `${a} ${b[0]}.` : a; };
+const unidadesTxt = n => `${n.toLocaleString('es-AR')} ${n === 1 ? 'unidad' : 'unidades'}`;
 
 export function vistaGrupal(ir){
   const raiz = el('div', { class:'wrap' });
@@ -31,8 +39,8 @@ export function vistaGrupal(ir){
           'Juntamos a todos los que quieren lo mismo y compramos de una. Baja el flete por kilo, se alcanza el mínimo del proveedor, y el precio baja para todos: también para el que reservó primero.'),
         el('div', { class:'grid g-3', style:{ marginTop:'16px' } },
           comoFunciona('1', 'Reservás', 'Elegís cuántas unidades querés. En preventa dejás una seña del ' + Math.round(SENA_PCT * 100) + '%.'),
-          comoFunciona('2', 'Se suma gente', 'Cada vez que alguien entra, el precio baja un escalón. Para todos, sin excepciones.'),
-          comoFunciona('3', 'Compramos y llega', 'Al llegar al mínimo compramos. Si no se llega, te devolvemos el 100%.'))),
+          comoFunciona('2', 'Se suma gente, día a día', 'Cada día ves cuántas unidades se pidieron y cuántas personas hay. El precio por unidad depende del total que se junte y baja para todos.'),
+          comoFunciona('3', 'Todos dan el OK y se pide', `Si todos los que reservaron dan su OK, se cierra y se compra ese mismo día, sin esperar los ${DIAS_CAMPANIA} días. Si al cierre no se llega al mínimo, te devolvemos el 100%.`))),
 
       abiertas.length ? el('section', { class:'section' },
         el('h2', { style:{ marginBottom:'14px' } }, 'Campañas abiertas'),
@@ -69,9 +77,22 @@ function avisoSync(){
     estadoSync.error ? el('div', { class:'tiny dim', style:{ marginTop:'4px' } }, 'Detalle: ' + estadoSync.error) : null);
 }
 
+/* Cuánto sale por unidad según el total de unidades que se junten. */
+function tablaCurva(tramos, { meta = null, actual = null } = {}){
+  const base = tramos[0]?.precio || 0;
+  return el('div', { class:'g-tabla-wrap' },
+    el('table', { class:'g-curva' },
+      el('thead', {}, el('tr', {}, el('th', {}, 'Si se juntan'), el('th', {}, 'Por unidad'), el('th', {}, 'Ahorro'))),
+      el('tbody', {}, ...tramos.map(t => el('tr', { class:(actual === t.desde ? 'actual' : '') + (meta === t.desde ? ' meta' : '') },
+        el('td', {}, unidadesTxt(t.desde), actual === t.desde ? el('small', {}, ' · hoy') : null),
+        el('td', {}, plata(t.precio)),
+        el('td', {}, base && t.precio < base ? `${Math.round((1 - t.precio / base) * 100)}% menos` : '—'))))));
+}
+
 /* ---------------- El producto que viene de "Traelo por mí" ---------------- */
 function seccionPendiente(p, ir, refrescar){
   const existente = campaniaPara({ titulo:p.titulo, url:p.url });
+  const tramos = p.curva?.length ? tramosDesdeCurva(p.curva) : null;
   const ahorro = p.soloARS > 0 ? Math.round((1 - p.grupoARS / p.soloARS) * 100) : 0;
   const irACampania = id => setTimeout(() => document.getElementById(`camp-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 60);
 
@@ -84,7 +105,7 @@ function seccionPendiente(p, ir, refrescar){
     abrir.disabled = true;
     try{
       const c = await proponerCampania({ titulo:p.titulo, imagen:p.imagen, itemRef:p.url, precioSolo:p.soloARS, precioGrupo:p.grupoARS,
-        meta:p.meta, nombre:nombre.value.trim(), email:email.value.trim(), cantidad:Math.max(1, +cant.value || 1), notas:p.motivo });
+        meta:p.meta, curva:p.curva, nombre:nombre.value.trim(), email:email.value.trim(), cantidad:Math.max(1, +cant.value || 1), notas:p.motivo });
       olvidarPendiente();
       toast('¡Compra grupal abierta y tu lugar reservado! Invitá a otros para que baje el precio', 'win');
       refrescar(); irACampania(c.id);
@@ -98,7 +119,13 @@ function seccionPendiente(p, ir, refrescar){
         el('small', {}, p.tienda ? `Tu producto en ${p.tienda}` : 'Tu producto'),
         el('h2', {}, p.titulo || 'Tu producto'),
         p.motivo ? el('p', {}, p.motivo) : null,
-        el('div', { class:'g-comp' },
+        tramos ? [
+          el('div', { class:'g-comp g-comp-uno' },
+            el('div', {}, el('small', {}, 'Si lo traés solo'), el('b', { class:'g-solo' }, plata(p.soloARS)), el('span', {}, 'por unidad, puesto en tu casa'))),
+          el('h3', { class:'g-curva-tit' }, 'Cuánto sale por unidad según cuántas se junten'),
+          tablaCurva(tramos, { meta:p.meta }),
+          el('p', { class:'g-curva-nota' }, 'No es lo mismo juntar 5 que 100: cada fila es el mismo cálculo de "Traelo por mí" con ese total de unidades viajando juntas (el flete, el depósito y el despachante se reparten). Cada uno paga el precio de la fila a la que se llegue, y el envío hasta su casa es aparte para cada uno.')]
+        : el('div', { class:'g-comp' },
           el('div', {}, el('small', {}, 'Si lo traés solo'), el('b', { class:'g-solo' }, p.soloARS ? plata(p.soloARS) : '—'), el('span', {}, 'por unidad')),
           el('div', { class:'g-comp-grupo' }, el('small', {}, `Comprando entre ${p.meta}`), el('b', {}, p.grupoARS ? plata(p.grupoARS) : '—'),
             el('span', {}, ahorro > 0 ? `${ahorro}% menos por unidad, estimado` : 'estimado por unidad'))))),
@@ -106,14 +133,14 @@ function seccionPendiente(p, ir, refrescar){
     existente
       ? el('div', { class:'g-accion' },
           el('div', { class:'notice notice-ok' }, el('b', {}, 'Ya hay una compra grupal abierta de este producto. '),
-            `Van ${estadoCampania(existente).reservadas} de ${existente.meta}: sumate y el precio baja para todos.`),
+            `Van ${unidadesTxt(estadoCampania(existente).reservadas)} de ${estadoCampania(existente).acuerdo.personas} personas: sumate y el precio baja para todos.`),
           el('div', { class:'row wrapf' },
             el('button', { class:'btn btn-lg btn-win spacer', onclick:() => abrirReserva(existente, () => { olvidarPendiente(); refrescar(); irACampania(existente.id); }) },
               ic('carrito'), 'Sumarme a esta compra grupal'),
             el('button', { class:'btn', onclick:() => irACampania(existente.id) }, 'Ver la campaña')))
       : el('div', { class:'g-accion' },
           el('h3', {}, 'Abrí la compra grupal de este producto'),
-          el('p', { class:'tiny muted' }, `Queda abierta ${14} días para que se sume gente. Cada vez que alguien entra, el precio baja un escalón para todos. Si no se llega a ${p.meta} unidades, no se compra y no pagás nada.`),
+          el('p', { class:'tiny muted' }, `Queda abierta ${DIAS_CAMPANIA} días para que se sume gente, y cada día se ve cuántas unidades se pidieron y cuántas personas hay. Cada participante da su OK: si el 100% está de acuerdo, se cierra y se pide ese día, sin esperar los ${DIAS_CAMPANIA} días. Si al cierre no se llega a ${unidadesTxt(p.meta)}, no se compra y no pagás nada.`),
           el('div', { class:'grid g-3' },
             el('div', { class:'field' }, el('label', {}, 'Nombre'), nombre),
             el('div', { class:'field' }, el('label', {}, 'Email para avisarte'), email),
@@ -121,9 +148,9 @@ function seccionPendiente(p, ir, refrescar){
           abrir),
 
     el('div', { class:'row wrapf', style:{ marginTop:'10px', gap:'14px' } },
-      el('button', { class:'p-link tiny', onclick:() => history.back() }, '← Volver al cálculo'),
+      el('button', { class:'p-link tiny', onclick:() => ir('#/pedido') }, '← Volver al cálculo'),
       el('button', { class:'p-link tiny', onclick:() => { olvidarPendiente(); refrescar(); } }, 'Quitar este producto')),
-    el('p', { class:'c-legal' }, 'El precio en grupo es una estimación con el mismo cálculo de "Traelo por mí" para todas las unidades juntas: el flete, el depósito y el despachante se reparten. El precio final lo confirmamos al cerrar la compra.'));
+    el('p', { class:'c-legal' }, 'Los precios en grupo son estimaciones con el mismo cálculo de "Traelo por mí". El precio final lo confirmamos al cerrar la compra, y nunca es mayor que el de la fila a la que se llegó.'));
 }
 
 const comoFunciona = (n, t, d) => el('div', { class:'card' },
@@ -136,6 +163,7 @@ function tarjeta(c, refrescar){
   const fam = FAMILIAS.find(f => f.id === c.familiaId);
   const colorEstado = { abierta:'var(--accion)', alcanzada:'var(--win)', 'lista-para-comprar':'var(--win)',
                         'no-alcanzo':'var(--bad)', cerrada:'var(--tx-3)' }[e.estado];
+  const activa = e.estado === 'abierta' || e.estado === 'alcanzada';
 
   return el('div', { class:'card', id:`camp-${c.id}`, style:{ borderTop:`3px solid ${colorEstado}` } },
     el('div', { class:'row', style:{ gap:'14px', alignItems:'flex-start', marginBottom:'12px' } },
@@ -144,7 +172,8 @@ function tarjeta(c, refrescar){
         el('div', { class:'row', style:{ gap:'7px', marginBottom:'4px' } },
           el('span', { class:'tag ' + (c.tipo === 'preventa' ? 'tag-niju' : 'tag-nac') },
             c.tipo === 'preventa' ? 'Preventa con seña' : 'Compra grupal'),
-          e.estado === 'alcanzada' ? el('span', { class:'tag tag-win' }, '¡Mínimo alcanzado!') : null),
+          e.acordada ? el('span', { class:'tag tag-win' }, 'Todos de acuerdo')
+            : e.estado === 'alcanzada' ? el('span', { class:'tag tag-win' }, '¡Mínimo alcanzado!') : null),
         el('h3', {}, c.titulo),
         fam ? el('div', { class:'tiny dim' }, fam.emo + ' ' + fam.nombre) : null)),
 
@@ -152,39 +181,34 @@ function tarjeta(c, refrescar){
       el('div', {},
         el('span', { class:'tiny strike' }, plata(c.precioBase)),
         el('div', { class:'price price-xl', style:{ color:'var(--win-tx)' } }, plata(e.precio)),
-        e.descuento ? el('div', { class:'saving' }, `${e.descuento}% menos que el precio de lista`) : null),
+        el('div', { class:'tiny dim' }, `por unidad con ${unidadesTxt(e.reservadas)} en total`),
+        e.descuento ? el('div', { class:'saving' }, `${e.descuento}% menos que ${c.origen === 'cliente' ? 'traerlo solo' : 'el precio de lista'}`) : null),
       el('div', { style:{ textAlign:'right' } },
-        el('div', { class:'kicker' }, 'Reservadas'),
+        el('div', { class:'kicker' }, e.acordada || !activa ? 'Pedidas' : `Día ${e.dia} de ${DIAS_CAMPANIA}`),
         el('b', { style:{ fontSize:'22px' } }, `${e.reservadas}/${e.meta}`),
-        el('div', { class:'tiny dim' }, e.diasRestantes + ' días restantes'))),
+        el('div', { class:'tiny dim' }, `${e.acuerdo.personas} ${e.acuerdo.personas === 1 ? 'persona' : 'personas'}`),
+        activa ? el('div', { class:'tiny dim' }, e.diasRestantes + ' días restantes') : null)),
 
     el('div', { class:'bar', style:{ marginBottom:'8px' } },
       el('i', { style:{ width:e.avance + '%', background:colorEstado } })),
 
-    el('div', { class:'notice ' + (e.estado === 'no-alcanzo' ? 'notice-bad' : e.alcanzada ? 'notice-ok' : ''), style:{ marginBottom:'12px' } },
+    el('div', { class:'notice ' + (e.estado === 'no-alcanzo' ? 'notice-bad' : e.alcanzada || e.acordada ? 'notice-ok' : ''), style:{ marginBottom:'12px' } },
       e.mensaje),
+
+    acuerdo(c, e, activa, refrescar),
+    porDia(c),
 
     /* escalones de precio */
     el('div', { style:{ marginBottom:'12px' } },
-      el('div', { class:'kicker', style:{ marginBottom:'6px' } }, 'Escalones de precio'),
-      ...c.tramos.map(t => {
-        const activo = e.tramo.desde === t.desde;
-        const logrado = e.reservadas >= t.desde;
-        return el('div', { class:'row-b tiny', style:{
-          padding:'5px 8px', borderRadius:'var(--r)',
-          background: activo ? 'var(--accion-suave)' : 'transparent',
-          opacity: logrado || activo ? 1 : .55
-        }},
-          el('span', {}, (logrado ? '✓ ' : '') + `Desde ${t.desde} unidades`),
-          el('b', { class:'mono', style:{ color: activo ? 'var(--accion)' : '' } }, plata(t.precio)));
-      })),
+      el('div', { class:'kicker', style:{ marginBottom:'6px' } }, 'Precio por unidad según el total'),
+      tablaCurva(c.tramos, { meta:c.meta, actual:e.tramo.desde })),
 
-    e.estado === 'abierta' || e.estado === 'alcanzada'
+    activa
       ? el('div', { class:'row wrapf' },
           el('button', { class:'btn btn-win spacer', onclick:() => abrirReserva(c, refrescar) },
             ic('carrito'), c.tipo === 'preventa' ? `Reservar con ${Math.round(SENA_PCT*100)}% de seña` : 'Sumarme a la compra'),
           el('button', { class:'btn', title:'Copiar el enlace para invitar', onclick:() => {
-            const txt = `Sumate a la compra grupal de ${c.titulo} en NiJu: cuantos más seamos, más barato para todos. Ahora está ${plata(e.precio)}.`;
+            const txt = `Sumate a la compra grupal de ${c.titulo} en NiJu: cuantos más seamos, más barato para todos. Ahora está ${plata(e.precio)} por unidad.`;
             navigator.clipboard?.writeText(txt);
             toast('Mensaje copiado: mandáselo a quien quieras', 'win');
           } }, ic('megafono'), 'Invitar'))
@@ -193,6 +217,53 @@ function tarjeta(c, refrescar){
     /* lo que ve el dueño */
     resultadoDueno(c, e)
   );
+}
+
+/* El OK de cada participante. Si el 100% está de acuerdo, se cierra antes. */
+function acuerdo(c, e, activa, refrescar){
+  const rs = c.reservas || [];
+  if (!rs.length) return null;
+  const pendientesMias = rs.filter(r => esMia(r) && !r.ok);
+  const mias = rs.filter(esMia);
+  const boton = el('button', { class:'btn btn-win btn-block', onclick:async () => {
+    boton.disabled = true;
+    try{
+      let c2 = c;
+      for (const r of pendientesMias) c2 = await darOk(c.id, r.id);
+      toast(estadoCampania(c2 || c).acordada ? '¡Todos de acuerdo! El pedido se cierra y se hace hoy' : 'Tu OK quedó registrado. Falta que lo den los demás', 'win');
+      refrescar();
+    }catch(err){ toast(err.message || 'No se pudo registrar tu OK', 'bad'); boton.disabled = false; }
+  } }, ic('check'), `Doy mi OK a ${plata(e.precio)} por unidad`);
+
+  return el('div', { class:'g-ok' },
+    el('div', { class:'row-b' },
+      el('div', { class:'kicker' }, 'De acuerdo con el precio'),
+      el('b', { class:'tiny' }, `${e.acuerdo.conOk} de ${e.acuerdo.personas} dieron el OK`)),
+    el('div', { class:'bar', style:{ margin:'6px 0' } }, el('i', { style:{ width:e.acuerdo.pct + '%', background:'var(--win)' } })),
+    el('div', { class:'g-ok-lista' }, ...rs.map(r => el('span', { class:r.ok ? 'si' : '' },
+      r.ok ? '✓ ' : '○ ', nombreCorto(r.nombre), esMia(r) ? ' (vos)' : '', ` · ${r.cantidad} u.`))),
+    activa && pendientesMias.length ? [
+      el('p', { class:'tiny muted', style:{ margin:'8px 0 6px' } },
+        `Tu OK vale para este precio o uno menor: si se suma gente, el precio solo baja. Cuando todos los que reservaron estén de acuerdo (hacen falta al menos ${MIN_PERSONAS_ACUERDO} personas), se pide sin esperar los ${DIAS_CAMPANIA} días.`),
+      boton]
+    : activa && mias.length ? el('p', { class:'tiny muted', style:{ margin:'8px 0 0' } }, ic('check'), ' Ya diste tu OK. Te avisamos cuando lo den todos.')
+    : activa && e.acuerdo.personas < MIN_PERSONAS_ACUERDO ? el('p', { class:'tiny muted', style:{ margin:'8px 0 0' } },
+        `Para cerrar antes hacen falta al menos ${MIN_PERSONAS_ACUERDO} personas: invitá a alguien.`) : null);
+}
+
+/* Cada día: cuántas unidades se pidieron y cuántas personas hay, acumulado. */
+function porDia(c){
+  const dias = avancePorDia(c);
+  return el('details', { class:'g-dias', open:true },
+    el('summary', { class:'kicker' }, 'Día por día'),
+    el('div', { class:'g-tabla-wrap' },
+      el('table', {},
+        el('thead', {}, el('tr', {}, el('th', {}, 'Día'), el('th', {}, 'Unidades pedidas'), el('th', {}, 'Personas'), el('th', {}, 'Con OK'))),
+        el('tbody', {}, ...dias.slice().reverse().map((d, i) => el('tr', { class:i === 0 ? 'hoy' : '' },
+          el('td', {}, `${d.dia} · ${new Date(d.fecha).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit' })}`),
+          el('td', {}, String(d.unidades), d.nuevasUnidades ? el('small', {}, ` +${d.nuevasUnidades}`) : null),
+          el('td', {}, String(d.personas), d.nuevasPersonas ? el('small', {}, ` +${d.nuevasPersonas}`) : null),
+          el('td', {}, `${d.ok}/${d.personas}`)))))));
 }
 
 /* Margen y capital: solo el dueño. Antes lo veía cualquier cliente con cuenta. */
@@ -221,17 +292,26 @@ function abrirReserva(c, refrescar){
   const cant   = el('input', { class:'inp', type:'number', min:'1', value:'1' });
   const resumen = el('div');
 
+  /* Con tus unidades sumadas, el total puede pasar a una fila más barata. */
+  const precioCon = n => {
+    const total = e.reservadas + n;
+    let t = c.tramos[0];
+    for (const x of c.tramos) if (total >= x.desde) t = x;
+    return t.precio;
+  };
   const actualizar = () => {
     const n = Math.max(1, +cant.value || 1);
-    const sena = c.tipo === 'preventa' ? Math.round(e.precio * n * SENA_PCT) : 0;
+    const precio = precioCon(n);
+    const sena = c.tipo === 'preventa' ? Math.round(precio * n * SENA_PCT) : 0;
     resumen.replaceChildren(
-      fila('Precio unitario de hoy', plata(e.precio)),
+      fila('Unidades en total, con las tuyas', String(e.reservadas + n)),
+      fila('Precio por unidad con ese total', plata(precio)),
       fila('Cantidad', String(n)),
-      fila('Total', plata(e.precio * n)),
+      fila('Total', plata(precio * n)),
       c.tipo === 'preventa' ? el('div', { class:'cost-line total' },
         el('span', {}, `Seña a pagar ahora (${Math.round(SENA_PCT*100)}%)`), el('b', {}, plata(sena))) : null,
       el('div', { class:'notice notice-ok', style:{ marginTop:'10px' } },
-        'Si el precio baja porque se suma más gente, te lo cobramos al precio más bajo. Nunca pagás más de lo que termina saliendo.'));
+        'Si el precio baja porque se suma más gente, te lo cobramos al precio más bajo. Nunca pagás más de lo que termina saliendo. Después de reservar, das tu OK cuando estés de acuerdo.'));
   };
   cant.addEventListener('input', actualizar);
   actualizar();
@@ -245,7 +325,8 @@ function abrirReserva(c, refrescar){
       el('button', { class:'btn btn-lg btn-win btn-block', onclick:() => {
         if (!nombre.value.trim()) return toast('Poné tu nombre', 'bad');
         reservar(c.id, { nombre:nombre.value.trim(), email:email.value.trim(), cantidad:Math.max(1, +cant.value || 1) })
-          .then(() => { toast('¡Reserva tomada! Te avisamos cuando se llegue al mínimo', 'win'); cerrar(); refrescar(); });
+          .then(() => { toast('¡Reserva tomada! Cuando estés de acuerdo con el precio, da tu OK en la campaña', 'win'); cerrar(); refrescar(); })
+          .catch(err => toast(err.message || 'No se pudo reservar', 'bad'));
       } }, 'Confirmar reserva'),
       el('p', { class:'tiny dim center' },
         'Si no se llega al mínimo antes del cierre, te devolvemos el 100% sin preguntas.')) });

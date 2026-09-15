@@ -92,6 +92,15 @@ export function vistaPedido(ir){
   let panel = null;          // panel de importación del producto actual
   const form = { pesoKg:1, unidades:1, destino:'uso', rubro:'tecnologia' };
 
+  /* El producto que se está cotizando queda en la pestaña: "Volver al cálculo"
+     desde Compra grupal lo muestra de nuevo, con lo cargado (pedido de Claudio). */
+  const ACTUAL = 'niju.pedidoActual';
+  const recordarActual = (u, d) => { try{ sessionStorage.setItem(ACTUAL, JSON.stringify({ url:u, datos:d, ts:Date.now() })); }catch{} };
+  const olvidarActual = () => { try{
+    sessionStorage.removeItem(ACTUAL);
+    if (panel?.memoria) sessionStorage.removeItem(panel.memoria);
+  }catch{} };
+
   /* ---------- Entrada ---------- */
   const link = el('input', { type:'url', inputmode:'url', 'aria-label':'Link del producto',
     placeholder:'Pegá el link del producto de cualquier tienda' });
@@ -122,6 +131,7 @@ export function vistaPedido(ir){
          y el cliente escribe el precio al lado de la foto. */
       d.leido = !!d.titulo && (d.ok || d.confianza === 'parcial');
       datos = d;
+      recordarActual(u, d);
       if (!d.leido){
         // El backend puede devolver un error técnico: al cliente le hablamos claro.
         const tecnico = !d.sugerencia;
@@ -137,6 +147,7 @@ export function vistaPedido(ir){
       pintarEncontrado(d);
     }catch(e){
       datos = null;
+      recordarActual(u, null);
       const motivo = !navigator.onLine ? 'Tu teléfono o computadora está sin internet.'
         : e.name === 'AbortError' ? 'La tienda tardó demasiado en responder (probamos dos veces).'
         : 'No pudimos hablar con el servidor de NiJu (probamos dos veces).';
@@ -241,11 +252,13 @@ export function vistaPedido(ir){
       const leido = datos?.leido;
       const clave = leido ? `${form.url}|${form.titulo}` : `${form.url}|manual`;
       if (panel?.clave !== clave){
-        panel = panelImportacion({ ir, alConfirmar:pedirImportacion, producto: leido
-          ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url, imagen:form.imagen }
+        const memoria = `niju.cotizacion:${clave}`;
+        panel = panelImportacion({ ir, alConfirmar:pedirImportacion, memoria, producto: leido
+          ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url, imagen:form.imagen,
+              pesoKg:datos.pesoKg || null, medidasCm:datos.medidasCm || null }
           : null,
           sugerido:leido ? null : { titulo:form.titulo, origen:form.origen, tienda:form.tienda, url:form.url } });
-        panel.clave = clave;
+        Object.assign(panel, { clave, memoria });
       }
       if (leido) panel.actualizarPrecio(form.precio, form.moneda);
       if (cotizBox.firstChild !== panel) cotizBox.replaceChildren(panel);
@@ -330,6 +343,7 @@ export function vistaPedido(ir){
       totalARS:res.totalARS, regimen:res.via, desglose:res
     });
     toast('¡Pedido creado! Te mandamos la cotización final', 'win');
+    olvidarActual();
     link.value = ''; panel = null;
     estado.replaceChildren(); manualBox.replaceChildren(); cotizBox.replaceChildren();
     pintar();
@@ -348,6 +362,7 @@ export function vistaPedido(ir){
       totalARS, regimen:imp?.regimen || null, feeUSD:fee.feeUSD, ivaFeeARS:comp.iva
     });
     toast('¡Pedido creado! Te mandamos la cotización final', 'win');
+    olvidarActual();
     link.value = '';
     estado.replaceChildren(); manualBox.replaceChildren(); cotizBox.replaceChildren();
     pintar();
@@ -426,6 +441,17 @@ export function vistaPedido(ir){
 
   pintar();
   raiz.append(cuerpo);
+
+  /* Vuelve al producto que se estaba cotizando (vence en un día). */
+  try{
+    const a = JSON.parse(sessionStorage.getItem(ACTUAL) || 'null');
+    if (a?.url && Date.now() - a.ts < 864e5){
+      link.value = a.url; datos = a.datos;
+      if (a.datos?.leido) pintarEncontrado(a.datos);
+      else { estado.replaceChildren(tarjetaOrigen(a.url, a.datos?.tienda || null)); pintarManual(a.url, a.datos?.tienda || null); }
+      setTimeout(() => estado.scrollIntoView({ block:'start' }), 80);
+    }
+  }catch{}
   return raiz;
 }
 

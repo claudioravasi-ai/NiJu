@@ -317,3 +317,22 @@
 .g-accion{ display:flex; flex-direction:column; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--line-soft); }
 .g-accion h3{ margin:0; font-size:17px; }
 @media (max-width:640px){ .g-prod{ grid-template-columns:minmax(0,1fr); } .g-prod-foto{ max-width:160px; } .g-comp{ grid-template-columns:minmax(0,1fr); } }
+/* Compra grupal: precio según el total, día por día y OK de cada uno (15-09-2026) */
+.g-comp-uno{ grid-template-columns:minmax(0,1fr); max-width:320px; }
+.g-curva-tit{ margin:14px 0 4px; font-size:15px; }
+.g-tabla-wrap{ overflow-x:auto; }
+.g-curva, .g-dias table{ width:100%; border-collapse:collapse; font-size:13px; }
+.g-curva th, .g-curva td, .g-dias th, .g-dias td{ padding:5px 8px; text-align:right; border-bottom:1px solid var(--line-soft); white-space:nowrap; }
+.g-curva th:first-child, .g-curva td:first-child, .g-dias th:first-child, .g-dias td:first-child{ text-align:left; }
+.g-curva th, .g-dias th{ font-size:11.5px; font-weight:600; color:var(--tx-3); }
+.g-curva tr.meta td{ background:color-mix(in srgb, var(--win) 10%, transparent); }
+.g-curva tr.actual td{ background:var(--accion-suave); font-weight:700; }
+.g-curva small, .g-dias small{ color:var(--win-tx); font-weight:600; }
+.g-curva-nota{ font-size:12.5px; color:var(--tx-2); margin:6px 0 0; }
+.g-dias{ margin:0 0 12px; }
+.g-dias summary{ cursor:pointer; margin-bottom:6px; }
+.g-dias tr.hoy td{ font-weight:700; }
+.g-ok{ margin:0 0 12px; padding:10px 12px; border-radius:var(--r); background:var(--surface-2); }
+.g-ok-lista{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.g-ok-lista span{ font-size:12px; padding:3px 8px; border-radius:999px; background:var(--surface); color:var(--tx-2); }
+.g-ok-lista span.si{ background:color-mix(in srgb, var(--win) 16%, var(--surface)); color:var(--win-tx); font-weight:600; }

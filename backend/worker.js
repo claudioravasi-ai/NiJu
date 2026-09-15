@@ -715,9 +715,18 @@ async function campanias(req, url, env, cors){
   const leer  = async () => JSON.parse(await env.NIJU.get('campanias') || '[]');
   const grabar = async (cs) => env.NIJU.put('campanias', JSON.stringify(cs));
 
+  /* La clave de cada reserva (con la que se da el OK) y el email nunca salen del servidor. */
+  const dueno = esDueno(req, env);
+  const publica = c => ({ ...c, reservas:(c.reservas || []).map(({ clave, email, ...r }) => dueno ? { ...r, email } : r) });
+  /* Id y clave los genera el dispositivo de quien reserva; si no son válidos, se inventan acá. */
+  const idReserva = v => /^[a-z0-9-]{6,40}$/i.test(v || '') ? v : 'r' + crypto.randomUUID().slice(0, 8);
+  const claveReserva = v => /^[a-z0-9-]{16,120}$/i.test(v || '') ? v : null;
+  const abierta = (c, ahora = Date.now()) => c.estado === 'abierta' && c.cierra > ahora;
+
   if (req.method === 'GET'){
     const cs = await leer();
-    return json({ campanias: id ? cs.filter(c => c.id === id) : cs }, cors);
+    /* Sin caché: con max-age=600 quien abría una campaña no la veía por 10 minutos. */
+    return json({ campanias:(id ? cs.filter(c => c.id === id) : cs).map(publica) }, { ...cors, 'cache-control':'no-store' });
   }
 
   if (req.method === 'POST'){
@@ -727,18 +736,33 @@ async function campanias(req, url, env, cors){
     if (accion === 'reservar'){
       const i = cs.findIndex(c => c.id === id);
       if (i < 0) return json({ error:'campaña inexistente' }, cors, 404);
+      if (!abierta(cs[i])) return json({ error:'Esta compra grupal ya se cerró: no se puede sumar gente.' }, cors, 409);
       const nombre = String(cuerpo.nombre || '').slice(0, 80).trim();
       const cantidad = Math.max(1, Math.min(999, parseInt(cuerpo.cantidad) || 1));
       if (!nombre) return json({ error:'falta el nombre' }, cors, 400);
       cs[i].reservas = cs[i].reservas || [];
       cs[i].reservas.push({
-        id: crypto.randomUUID().slice(0, 8), nombre,
+        id: idReserva(cuerpo.id), clave: claveReserva(cuerpo.clave), nombre,
         email: String(cuerpo.email || '').slice(0, 120),
         cantidad, precioAlReservar: cuerpo.precioAlReservar || null,
-        sena: cuerpo.sena || 0, ts: Date.now()
+        sena: cuerpo.sena || 0, ok:false, ts: Date.now()
       });
       await grabar(cs);
-      return json({ ok:true, campania: cs[i] }, cors);
+      return json({ ok:true, campania: publica(cs[i]) }, cors);
+    }
+
+    /* Cada participante da su OK con la clave de su reserva. Si todos (y son al
+       menos dos) están de acuerdo, el pedido se cierra antes de los 12 días. */
+    if (accion === 'acuerdo'){
+      const c = cs.find(x => x.id === id);
+      if (!c) return json({ error:'campaña inexistente' }, cors, 404);
+      if (!abierta(c)) return json({ error:'Esta compra grupal ya se cerró.' }, cors, 409);
+      const r = (c.reservas || []).find(x => x.id === cuerpo.reservaId);
+      if (!r || !r.clave || r.clave !== cuerpo.clave) return json({ error:'La clave de la reserva no coincide' }, cors, 403);
+      r.ok = true; r.okTs = Date.now();
+      if (c.reservas.length >= 2 && c.reservas.every(x => x.ok)){ c.estado = 'acordada'; c.cerradaEn = Date.now(); }
+      await grabar(cs);
+      return json({ ok:true, campania:publica(c) }, cors);
     }
 
     /* Un cliente propone una compra grupal desde "Traelo por mí" cuando traerlo
@@ -757,14 +781,14 @@ async function campanias(req, url, env, cors){
       if (!titulo || !(precioBase > 0) || !tramos.length || !nombre) return json({ error:'faltan datos de la compra grupal' }, cors, 400);
       const url = /^https?:\/\//i.test(cuerpo.itemRef || '') ? texto(cuerpo.itemRef, 600) : null;
       const ahora = Date.now();
-      const reserva = { id:crypto.randomUUID().slice(0, 8), nombre, email:texto(r0.email, 120),
-        cantidad:Math.max(1, Math.min(999, parseInt(r0.cantidad) || 1)), precioAlReservar:tramos[0].precio, sena:0, ts:ahora };
-      const existente = url && cs.find(c => c.itemRef === url && c.estado === 'abierta' && c.cierra > ahora);
+      const reserva = { id:idReserva(r0.id), clave:claveReserva(r0.clave), nombre, email:texto(r0.email, 120),
+        cantidad:Math.max(1, Math.min(999, parseInt(r0.cantidad) || 1)), precioAlReservar:tramos[0].precio, sena:0, ok:false, ts:ahora };
+      const existente = url && cs.find(c => c.itemRef === url && abierta(c, ahora));
       if (existente){
         existente.reservas = existente.reservas || [];
         existente.reservas.push(reserva);
         await grabar(cs);
-        return json({ ok:true, campania:existente, existente:true }, cors);
+        return json({ ok:true, campania:publica(existente), existente:true }, cors);
       }
       const limite = `limite-camp:${new Date().toISOString().slice(0, 10)}:${req.headers.get('cf-connecting-ip') || 'sin-ip'}`;
       const usadas = +(await env.NIJU.get(limite) || 0);
@@ -772,7 +796,7 @@ async function campanias(req, url, env, cors){
       await env.NIJU.put(limite, String(usadas + 1), { expirationTtl:90000 });
       const c = { id:'cg-' + crypto.randomUUID().slice(0, 8), tipo:'grupal', origen:'cliente', titulo,
         imagen:/^https:\/\//i.test(cuerpo.imagen || '') ? texto(cuerpo.imagen, 600) : null, itemRef:url, familiaId:null,
-        precioBase, meta, tramos, creada:ahora, cierra:ahora + 14 * 864e5, estado:'abierta', notas:texto(cuerpo.notas, 400), reservas:[reserva] };
+        precioBase, meta, tramos, creada:ahora, cierra:ahora + 12 * 864e5, estado:'abierta', notas:texto(cuerpo.notas, 400), reservas:[reserva] };
       cs.push(c);
       await grabar(cs);
       return json({ ok:true, campania:c }, cors);
@@ -1365,6 +1389,11 @@ function extraer(html, u, tienda){
       out.descripcion = out.descripcion || limpiarTexto(nodo.description);
       const img = [].concat(nodo.image || [])[0];
       out.imagen = out.imagen || (typeof img === 'string' ? img : img?.url) || null;
+      out.pesoKg = out.pesoKg ?? medida(nodo.weight, aKg);
+      if (!out.medidasCm){
+        const m = ['depth', 'width', 'height'].map(k => medida(nodo[k], aCm));
+        if (m.every(v => v > 0)) out.medidasCm = m;
+      }
       const of = [].concat(nodo.offers || [])[0];
       if (of){
         anotar(of.price, 'schema.org');
@@ -1397,6 +1426,20 @@ function extraer(html, u, tienda){
   out.moneda = out.moneda || (meta('product:price:currency') || meta('og:price:currency') || '').toUpperCase() || null;
   if (!out.fuente && out.titulo) out.fuente = 'open graph';
 
+  /* Peso y medidas del bulto, si la ficha los escribe (Made-in-China: "Gross Weight",
+     "Package Size"). Sirven para el flete y el transporte hasta la casa. */
+  const texto = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  if (out.pesoKg == null){
+    const m = texto.match(/(?:gross weight|package weight|shipping weight|peso bruto|peso del paquete|peso)\s*[:：]?\s*([\d.,]+)\s*(kgs?|g|lbs?)\b/i);
+    if (m) out.pesoKg = aKg(num(m[1]), m[2]);
+  }
+  if (!out.medidasCm){
+    const m = texto.match(/(?:package size|packing size|dimensions?|tamaño del paquete|medidas|dimensiones)\s*[:：(]?\s*(?:[a-z*×]+\)?\s*[:：]?\s*)?([\d.,]+)\s*[x×*]\s*([\d.,]+)\s*[x×*]\s*([\d.,]+)\s*(cm|mm|m|in|inch(?:es)?)\b/i);
+    if (m){ const v = [m[1], m[2], m[3]].map(x => aCm(num(x), m[4])); if (v.every(x => x > 0)) out.medidasCm = v; }
+  }
+  if (!(out.pesoKg > 0 && out.pesoKg < 30000)) out.pesoKg = null;
+  if (out.medidasCm && !out.medidasCm.every(x => x > 0 && x < 2000)) out.medidasCm = null;
+
   /* 3) Últimos recursos */
   for (const m of html.matchAll(/"(?:price|salePrice|currentPrice)"\s*:\s*"?([\d.,]+)"?/gi)) anotar(m[1], 'código de la página');
   if (out.precio == null && out.candidatos.length) out.precio = out.candidatos[0].valor;
@@ -1427,6 +1470,24 @@ function extraer(html, u, tienda){
   if (out.imagen && out.imagen.startsWith('/'))  out.imagen = u.origin + out.imagen;
 
   return out;
+}
+
+/* Unidades de schema.org (unitCode) o escritas: KGM/kg, GRM/g, LBR/lb · CMT/cm, MMT/mm, MTR/m, INH/in. */
+function aKg(v, u = 'kg'){
+  if (!(v > 0)) return null;
+  const x = String(u).toLowerCase();
+  return Math.round((/^(grm|g)$/.test(x) ? v / 1000 : /^(lbr|lbs?)$/.test(x) ? v * 0.45359237 : v) * 100) / 100;
+}
+function aCm(v, u = 'cm'){
+  if (!(v > 0)) return null;
+  const x = String(u).toLowerCase();
+  return Math.round((/^(mmt|mm)$/.test(x) ? v / 10 : /^(mtr|m)$/.test(x) ? v * 100 : /^(inh|in|inch|inches)$/.test(x) ? v * 2.54 : v) * 10) / 10;
+}
+function medida(n, conv){
+  if (n == null) return null;
+  if (typeof n === 'object') return conv(num(n.value), n.unitCode || n.unitText || undefined);
+  const m = String(n).match(/([\d.,]+)\s*([a-z]+)?/i);
+  return m ? conv(num(m[1]), m[2] || undefined) : null;
 }
 
 function* aplanar(d){

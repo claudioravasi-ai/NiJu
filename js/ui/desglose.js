@@ -20,8 +20,9 @@ import { FX, aUSD } from '../engine/fx.js';
 import { calcularFee } from '../engine/fees.js';
 import { PERFILES } from '../engine/fiscal.js';
 import { SELLO, CONSULTADO } from '../data/normas-importacion.js';
-import { ETAPAS, OPERADORES, OPERADOR_BY_ID, DESPACHANTE_REFERENCIA, CIUDADES_CHINA, CIUDAD_CHINA_BY_ID, referencia } from '../data/etapas-envio.js';
-import { desglosar, recomendar } from '../engine/importacion.js';
+import { ETAPAS, OPERADORES, OPERADOR_BY_ID, DESPACHANTE_REFERENCIA, CIUDADES_CHINA, CIUDAD_CHINA_BY_ID, referencia,
+  pesoFacturable, transportesPara, FACTOR_VOLUMETRICO } from '../data/etapas-envio.js';
+import { desglosar, recomendar, motivosSinPequenoEnvio } from '../engine/importacion.js';
 import { guardarPendiente } from '../engine/grupal.js';
 import { cargarArancel, arancelListo, buscarPosiciones, porCodigo, descripcionCompleta } from '../engine/arancel.js';
 import { clasificarProducto, preguntarAsesor } from '../engine/asesor.js';
@@ -46,7 +47,7 @@ const liviano = d => d.disponible
         ({ etapa, id, k, usd:u, ars, formula, sello, informativa:!!informativa, recupero:recupero?.texto, fuente, explica })) }
   : { disponible:false, motivos:d.motivos };
 
-export function panelImportacion({ ir, producto = null, sugerido = null, alConfirmar = null, alCambiar = null }){
+export function panelImportacion({ ir, producto = null, sugerido = null, alConfirmar = null, alCambiar = null, memoria = null }){
   const cfg = () => store.get('config') || {};
   const guardarCfg = cambios => store.set('config', { ...cfg(), ...cambios });
   const usuario = store.get('usuario');
@@ -55,7 +56,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
 
   const s = {
     titulo:producto?.titulo || sugerido?.titulo || '', precio:producto?.precio ?? null, moneda:producto?.moneda || 'USD',
-    unidades:1, pesoKg:1, destino:cfg().destinoCompra || 'uso',
+    unidades:1, pesoKg:producto?.pesoKg || 1, medidas:producto?.medidasCm || [null, null, null], destino:cfg().destinoCompra || 'uso',
     inscriptoGanancias:cfg().inscriptoGanancias ?? (perfilId === 'responsable_inscripto'),
     enviosAnio:cfg().pequenosEnviosAnio ?? 0,
     operador:'logistika-aereo', pago:cfg().pagoExterior || 'tarjeta', origen:sugerido?.origen || cfg().origenCompra || 'china', ciudadChina:cfg().ciudadChina || 'guangzhou',
@@ -64,8 +65,20 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
     tocados:new Set(),
     arancel:'cargando', errorArancel:'', clasificando:false, clasif:null, opciones:[], busquedaNCM:'', posicion:null, ivaReducido:false,
     locales:null, buscandoLocal:false, localElegido:null,
-    tab:'pequeno', tabElegida:false, chat:[], pensando:false, resultado:null
+    tab:'pequeno', tabElegida:false, chat:[], pensando:false, resultado:null, posicionFijada:false
   };
+
+  /* Pedido de Claudio: "Volver al cálculo" desde Compra grupal tiene que dejarlo
+     donde estaba. Lo que cargó se guarda en la pestaña con la clave `memoria`. */
+  const GUARDAR = ['unidades', 'pesoKg', 'medidas', 'operador', 'tab', 'tabElegida', 'costos', 'posicion', 'posicionFijada', 'ivaReducido',
+    ...(producto ? [] : ['titulo', 'precio', 'moneda'])];
+  if (memoria) try{
+    const g = JSON.parse(sessionStorage.getItem(memoria) || 'null');
+    if (g){ const { tocados, ...resto } = g; Object.assign(s, resto); s.tocados = new Set(tocados || []); }
+  }catch{}
+  const recordar = () => { if (memoria) try{
+    sessionStorage.setItem(memoria, JSON.stringify({ ...Object.fromEntries(GUARDAR.map(k => [k, s[k]])), tocados:[...s.tocados] }));
+  }catch{} };
 
   /* Armado tipo checkout: pasos numerados a la izquierda, resumen fijo a la
      derecha (en el celular, barra abajo con el total y el botón). */
@@ -75,6 +88,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
   const cajaNCM      = el('div');
   const secEtapas    = el('section', { class:'dz-sec', id:`${pid}-3` });
   const cajaOps      = el('div', { class:'dz-ops', role:'radiogroup', 'aria-label':'Con quién viaja' });
+  const cajaTransportes = el('div', { class:'dz-transp' });
   const secDesglose  = el('section', { class:'dz-sec', id:`${pid}-4`, 'aria-live':'polite' });
   const secComparar  = el('section', { class:'dz-sec' });
   const secConsejo   = el('section', { class:'dz-sec dz-consejo' });
@@ -149,7 +163,13 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
       el('div', { class:'dz-fila' },
         campoNum('Cantidad de unidades iguales', s.unidades, v => { s.unidades = Math.max(1, Math.round(v || 1)); recalcular(); }, { pref:'u.', paso:'1', min:'1' }),
         campoNum('Peso de cada unidad, con embalaje', s.pesoKg, v => { s.pesoKg = v || 0; recalcular(); },
-          { pref:'kg', paso:'0.1', requerido:true, ayuda:'Suele figurar en la ficha de la tienda. Define el flete y si entra en los 50 kg.' })),
+          { pref:'kg', paso:'0.1', requerido:true, ayuda:producto?.pesoKg ? 'Leído de la ficha de la tienda. Revisalo: define el flete y si entra en los 50 kg.'
+            : 'Suele figurar en la ficha de la tienda. Define el flete y si entra en los 50 kg.' })),
+      el('div', { class:'dz-fila dz-medidas' },
+        ...['Largo', 'Ancho', 'Alto'].map((t, i) => campoNum(`${t} del bulto`, s.medidas[i], v => { s.medidas = s.medidas.map((m, j) => j === i ? v : m); recalcular(); },
+          { pref:'cm', paso:'1', vacio:'opcional' }))),
+      el('p', { class:'c-legal' }, producto?.medidasCm ? 'Medidas leídas de la ficha de la tienda. ' : '',
+        `Las medidas no cambian los impuestos, pero los transportes cobran por el peso real o por el volumétrico (largo × ancho × alto ÷ ${FACTOR_VOLUMETRICO.toLocaleString('es-AR')}), el que sea mayor. En la ficha suelen figurar como "tamaño del paquete".`),
       el('h3', { class:'dz-h3' }, 'Qué es para la Aduana'),
       el('p', { class:'dz-sub' }, 'Cada producto tiene un código en la Nomenclatura Común del Mercosur (NCM). De ese código sale el porcentaje de derecho de importación, que leemos del Arancel Integrado de ARCA. Elegí el que describe tu producto.'),
       cajaNCM);
@@ -185,7 +205,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
       el('div', { class:'k2-campo', style:{ marginTop:'10px' } }, el('span', {}, s.posicion ? '¿Es otra? Elegí la que describe tu producto' : 'Elegí la que describe tu producto'),
         el('div', { class:'dz-lista' }, ...s.opciones.map(p => el('button', {
           class:'dz-opcion' + (s.posicion?.codigo === p.codigo ? ' on' : ''),
-          onclick:() => { s.posicion = p; pintarNCM(); recalcular(); } },
+          onclick:() => { s.posicion = p; s.posicionFijada = true; pintarNCM(); recalcular(); } },
           el('span', { class:'mono' }, p.codigo), el('b', { class:'mono' }, `${p.die.toLocaleString('es-AR')}%`),
           el('small', {}, descripcionCompleta(p) + (p.cuando ? ` — ${p.cuando}` : '')))))));
 
@@ -218,8 +238,9 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
     const alternativas = (c.alternativas || []).flatMap(a => porCodigo(a.ncm).map(p => ({ ...p, cuando:a.cuando })));
     const vistas = new Set();
     const opciones = [...principales, ...alternativas].filter(p => !vistas.has(p.codigo) && vistas.add(p.codigo));
-    Object.assign(s, { clasif:c, clasificando:false, opciones:opciones.slice(0, 20),
-      posicion:principales.length === 1 ? principales[0] : null, ivaReducido:false });
+    /* Si el cliente ya eligió la posición (o volvió a una cotización guardada), no se pisa. */
+    Object.assign(s, { clasif:c, clasificando:false, opciones:opciones.slice(0, 20) },
+      s.posicionFijada ? {} : { posicion:principales.length === 1 ? principales[0] : null, ivaReducido:false });
     pintarNCM(); recalcular();
   }
 
@@ -230,14 +251,23 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
       .catch(e => { s.arancel = 'error'; s.errorArancel = e.message || String(e); pintarNCM(); });
   }
 
+  /* ¿Solo puede viajar como carga? Pasa de 50 kg, de US$ 3.000, de 3 unidades o es
+     para vender. Entonces la tienda no lo manda por correo ni un courier puerta a
+     puerta: se ofrecen los que llevan carga (pedido de Claudio, 15-09-2026). */
+  const soloCarga = () => motivosSinPequenoEnvio({ fobUSD:aUSD(s.precio || 0, s.moneda) * s.unidades, pesoKg:s.pesoKg * s.unidades,
+    unidades:s.unidades, destino:s.destino }).length > 0;
   /* Operadores del origen elegido; en China, primero los de la ciudad de salida. */
-  const operadoresDe = () => OPERADORES.filter(o => !o.origen || o.origen === s.origen)
-    .sort((a, b) => (s.origen === 'china' ? (b.ciudad === s.ciudadChina) - (a.ciudad === s.ciudadChina) : 0));
+  const operadoresDe = () => {
+    const carga = soloCarga();
+    return OPERADORES.filter(o => (!o.origen || o.origen === s.origen) && (carga ? (o.carga || o.id === 'propio') : !o.soloCarga))
+      .sort((a, b) => (s.origen === 'china' ? (b.ciudad === s.ciudadChina) - (a.ciudad === s.ciudadChina) : 0));
+  };
   const asegurarOperador = () => {
     const lista = operadoresDe();
-    if (lista.some(o => o.id === s.operador)) return;
+    if (lista.some(o => o.id === s.operador)) return false;
     s.operador = lista[0].id;
     for (const c of ['internacionalUSD', 'arriboUSD']){ s.costos[c] = null; s.tocados.delete(c); }
+    return true;
   };
 
   /* ---------- 3. Etapas ---------- */
@@ -286,7 +316,10 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
           v => { s.ciudadChina = v; guardarCfg({ ciudadChina:v }); pintarEtapas(); recalcular(); }),
         el('p', { class:'c-legal', style:{ marginTop:'4px' } }, `${ciudad.nombre}: ${ciudad.quienes}; ${ciudad.salida}. Si no sabés, dejá Guangzhou: el seguimiento del pedido suele decir la ciudad. `,
           enlace('Fuente', ciudad.fuente.url))] : null,
+      soloCarga() ? el('div', { class:'notice', style:{ marginBottom:'10px' } },
+        el('b', {}, 'Viaja como carga. '), 'Por su peso, su valor, la cantidad o porque es para vender, no entra como pequeño envío: la tienda no lo manda por correo ni por courier puerta a puerta. Te mostramos quién lleva carga.') : null,
       cajaOps,
+      cajaTransportes,
       el('details', { class:'dz-mas' },
         el('summary', {}, 'Ver las 5 etapas del viaje y ajustar cada costo'),
         el('p', { class:'dz-sub', style:{ marginTop:'10px' } }, 'Cada etapa la hace alguien distinto y cobra lo suyo. Donde la empresa publica su tarifa, la usamos y te dejamos el link; donde no, usamos un valor general publicado. Si te cotizaron otro, escribilo.'),
@@ -305,7 +338,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
     const estimar = o => {
       if (o.id === 'propio') return { usd:s.tocados.has('internacionalUSD') ? s.costos.internacionalUSD : null, tipo:'Tu cotización', clase:'' };
       if (o.id === 'tienda-china') return { usd:0, tipo:'Incluido en el precio', clase:'ok' };
-      if (o.calcular) return { usd:o.calcular({ pesoKg:r.peso, valorUSD:r.fob }).internacionalUSD,
+      if (o.calcular) return { usd:o.calcular({ pesoKg:r.peso, valorUSD:r.fob, origen:s.origen }).internacionalUSD,
         tipo:o.publica === true ? 'Tarifa publicada' : 'Precio "desde"', clase:o.publica === true ? 'ok' : 'warn' };
       const ref = s.origen === 'china' ? referencia('fleteChinaCourier', { pesoKg:r.peso })?.valor : logistika.calcular({ pesoKg:r.peso, valorUSD:r.fob }).internacionalUSD;
       return { usd:ref ?? null, tipo:'Sin tarifa pública: estimado', clase:'warn' };
@@ -361,7 +394,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
         sellos[campo] = r.sello; detalles[campo] = r.detalle; if (r.fuente) fuentes[campo] = r.fuente;
       };
       const deOperador = (o, sello) => {
-        const c = o.calcular({ pesoKg:peso, valorUSD:fob });
+        const c = o.calcular({ pesoKg:peso, valorUSD:fob, origen:s.origen });
         poner('internacionalUSD', { valor:c.internacionalUSD, sello, fuente:fuenteOperador(o),
           detalle:`${o.empresa}: ${c.detalleInternacional}${c.desde ? ' (precio "desde")' : ''}` });
         if (c.arriboUSD != null) poner('arriboUSD', { valor:c.arriboUSD, sello, fuente:fuenteOperador(o), detalle:`${o.empresa}: ${c.detalleArribo}` });
@@ -400,7 +433,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
       const cif = fob + (costos.origenUSD || 0) + (costos.internacionalUSD || 0) + (costos.seguroUSD || 0);
       poner('depositoUSD', referencia('depositoUSD', { pesoKg:peso }));
       poner('despachanteUSD', referencia('despachanteUSD', { cifUSD:cif }));
-      poner('ultimaMillaARS', referencia('ultimaMillaARS', { pesoKg:peso, provincia:destino() }));
+      poner('ultimaMillaARS', referencia('ultimaMillaARS', { pesoKg:pesoFacturable(peso, s.medidas, s.unidades), provincia:destino() }));
       return { costos, sellos, detalles, fuentes };
     };
 
@@ -420,30 +453,86 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
      cuánto por unidad comprando entre varios (el mismo cálculo, con más unidades:
      el flete, el depósito y el despachante se reparten). */
   const META_GRUPAL = 10;
+  /* Pedido de Claudio: no es lo mismo juntar 5 que 100. Se calcula lo que sale por
+     unidad para cada total, con el mismo motor, y la compra grupal cobra según las
+     unidades que de verdad se junten. */
+  const CURVA_GRUPAL = [1, 2, 3, 5, 10, 20, 50, 100];
   function irAGrupal(r){
     const d = s.tab === 'pequeno' && r.pequeno.disponible ? r.pequeno : r.general.disponible ? r.general : r.pequeno;
-    const unidades = s.unidades;
-    let g;
-    s.unidades = unidades * META_GRUPAL;
-    try{ g = calcular(); }finally{ s.unidades = unidades; }
-    const dg = g.general.disponible ? g.general : g.pequeno;
     const L = (x, id) => x.disponible ? (x.lineas.find(l => l.id === id)?.ars || 0) : 0;
+    const unidades = s.unidades;
+    const antes = { unidades, operador:s.operador, costos:{ ...s.costos }, tocados:new Set(s.tocados) };
+    const soloPorUnidad = Math.round((d.totalARS || 0) / unidades);
+    /* Juntos viajan consolidados, como carga y con despachante; lo que cotizó el
+       cliente para su paquete no vale para 100. El envío a cada casa es de cada uno. */
+    const porUnidad = n => {
+      Object.assign(s, { unidades:unidades * n, costos:Object.fromEntries(Object.keys(s.costos).map(k => [k, null])), tocados:new Set() });
+      const g = calcular();
+      const dg = g.general.disponible ? g.general : g.pequeno;
+      return Math.round(((dg.totalARS || 0) - L(dg, 'ultima') + L(d, 'ultima') * n) / (unidades * n));
+    };
+    let curva;
+    try{ curva = CURVA_GRUPAL.map(n => ({ unidades:unidades * n, precio:n === 1 ? soloPorUnidad : porUnidad(n) })); }
+    finally{ Object.assign(s, antes); calcular(); }
     guardarPendiente({
       titulo:s.titulo, imagen:producto?.imagen || null, url:producto?.url || sugerido?.url || null,
-      tienda:producto?.tienda?.nombre || sugerido?.tienda?.nombre || '', unidades, pesoKg:s.pesoKg, origen:s.origen, meta:META_GRUPAL,
-      soloARS:Math.round((d.totalARS || 0) / unidades),
-      grupoARS:Math.round((dg.totalARS || 0) / (unidades * META_GRUPAL)),
+      tienda:producto?.tienda?.nombre || sugerido?.tienda?.nombre || '', unidades, pesoKg:s.pesoKg, origen:s.origen, meta:unidades * META_GRUPAL,
+      soloARS:soloPorUnidad, curva,
+      grupoARS:curva.find(p => p.unidades === unidades * META_GRUPAL)?.precio || soloPorUnidad,
       motivo:L(d, 'fob') ? `Traerlo solo, el avión o el barco cuesta ${Math.round(L(d, 'internacional') / L(d, 'fob') * 100)}% del valor del producto.` : ''
     });
     ir('#/grupal');
   }
 
+  /* ---------- De la Aduana a tu casa: a la vista en el paso 3 ---------- */
+  function pintarTransportes(r){
+    const elegida = s.tab === 'pequeno' ? r.pequeno : r.general;
+    const d = elegida.disponible ? elegida : r.pequeno.disponible ? r.pequeno : r.general;
+    const l = d.disponible ? d.lineas.find(x => x.id === 'ultima') : null;
+    const kg = pesoFacturable(r.peso, s.medidas, s.unidades);
+    const kgTxt = kg.toLocaleString('es-AR', { maximumFractionDigits:1 });
+    poner(cajaTransportes,
+      el('h3', { class:'dz-h3' }, 'De la Aduana a tu casa'),
+      el('p', { class:'dz-sub' }, `Para ${kgTxt} kg${kg > r.peso + 0.05 ? ' (el peso volumétrico, que es mayor que el real)' : ''} hasta ${destino()}.`),
+      l?.ars != null ? el('div', { class:'dz-transp-est' },
+        el('span', {}, el('b', {}, s.tocados.has('ultimaMillaARS') ? 'Tu cotización' : 'Precio estimado'), el('small', {}, l.formula)),
+        el('b', {}, plata(l.ars))) : null,
+      el('ul', { class:'dz-transportes' }, ...transportesPara(kg, destino()).map(t => el('li', {},
+        el('span', {}, el('b', {}, t.nombre), el('small', {}, `${t.zona}. ${t.cobra}`)),
+        el('a', { class:'c-fuente', href:t.url, target:'_blank', rel:'noopener' }, 'Cotizar ↗')))),
+      el('p', { class:'c-legal' }, 'Los precios que no publica el transporte pueden variar según las medidas, el peso, el destino y el valor declarado del producto: el que te coticen manda. Si ya tenés una cotización, cargala en "Ver las 5 etapas del viaje". Cruz del Sur y Vía Cargo piden resolver un control "no soy un robot", por eso la app no les puede pedir el precio sola.'));
+  }
+
+  let cargaAntes = null;
   function recalcular(){
+    const antes = s.operador;
     const r = calcular();
     s.resultado = r;
     if (!s.tabElegida) s.tab = r.pequeno.disponible ? 'pequeno' : 'general';
-    pintarOps(r); pintarDesglose(r); pintarConsejo(r); pintarResumen(r); pintarProgreso(r);
+    /* Al pasar a carga (o volver) cambian el aviso y las condiciones del operador. */
+    const carga = soloCarga();
+    if (s.operador !== antes || carga !== cargaAntes){ cargaAntes = carga; pintarEtapas(); }
+    pintarOps(r); pintarTransportes(r); pintarDesglose(r); pintarConsejo(r); pintarResumen(r); pintarProgreso(r);
+    recordar();
     alCambiar?.(r);
+  }
+
+  /* "Recuperás", explicado según la condición ante ARCA (pedido de Claudio). */
+  function explicarRecupero(d){
+    const vuelven = d.lineas.filter(l => !l.informativa && l.recupero?.tipo !== 'no' && l.ars);
+    return el('details', { class:'dz-recupero' },
+      el('summary', {}, `¿Qué quiere decir "Recuperás" como ${P.label}?`),
+      el('p', {}, 'No es un descuento. El día de la compra pagás el total; recuperar quiere decir que una parte vuelve después, porque era un adelanto de un impuesto o un crédito que podés usar. Hasta que vuelve, es plata tuya que queda en ARCA, y para recuperarla tenés que hacer el trámite.'),
+      vuelven.length
+        ? el('ul', {}, ...vuelven.map(l => el('li', {}, el('b', {}, `${l.k}: ${plata(l.ars)}. `), l.recupero.texto)))
+        : el('p', {}, el('b', {}, `En esta compra, como ${P.label}, no recuperás nada: `), 'todo lo que pagás es costo.'),
+      el('p', {}, P.computaIVA
+        ? 'Como Responsable Inscripto, el IVA de importación y el de la gestión de NiJu son crédito fiscal: los restás del IVA que cobrás por tus ventas en la declaración mensual. Las percepciones se descuentan de la declaración de cada impuesto.'
+        : perfilId === 'consumidor_final'
+          ? 'Como Consumidor Final no podés usar el IVA ni los derechos de Aduana: son costo. Lo único que suele volver es la percepción del 30% de la tarjeta (solo si pagás con tarjeta en pesos): si no estás inscripto en Ganancias ni en Bienes Personales, la pedís en devolución en la web de ARCA con clave fiscal; si estás inscripto, la descontás en tu declaración jurada.'
+          : `Como ${P.label} no computás el IVA como crédito fiscal: es costo. Las percepciones pueden descontarse de tus impuestos o pedirse en devolución; confirmalo con tu contador.`),
+      el('p', {}, el('b', {}, 'Costo real para vos'), ' = lo que pagás menos lo que recuperás. Es lo que te termina costando la compra una vez que hiciste esos trámites.'),
+      el('button', { class:'p-link', onclick:() => ir('#/impuestos?tab=perfil') }, '¿No es tu condición? Cambiala'));
   }
 
   /* ---------- 4. Desglose ---------- */
@@ -483,6 +572,7 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
         total('De eso, tributos de Aduana', plata(d.tributosARS), usd(d.tributosUSD)),
         total('Recuperás', plata(d.recuperaARS), `como ${P.label}`),
         total('Costo real para vos', plata(d.costoRealARS), 'lo que pagás menos lo que recuperás')),
+      explicarRecupero(d),
       el('p', { class:'dz-cambio' },
         `Todo va al dólar oficial ($ ${Math.round(FX.oficial).toLocaleString('es-AR')}). `,
         s.pago === 'tarjeta' ? `Lo que pagás afuera con tarjeta en pesos lleva además el 30% de percepción, en su propia línea: juntos dan el dólar tarjeta ($ ${Math.round(FX.tarjeta).toLocaleString('es-AR')}). ` : '',
@@ -544,7 +634,8 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
             linea('Envío a tu casa', L('ultima')),
             linea('Gestión de NiJu', L('niju'))),
           el('div', { class:'dz-r-total' }, el('span', {}, d.completo ? 'Total puesto en tu casa' : 'Total estimado'), el('b', {}, plata(d.totalARS))),
-          d.recuperaARS ? el('p', { class:'dz-r-recupera' }, ic('check'), ` Recuperás ${plata(d.recuperaARS)} · costo real ${plata(d.costoRealARS)}`) : null,
+          d.recuperaARS ? el('p', { class:'dz-r-recupera' }, ic('check'), ` Recuperás ${plata(d.recuperaARS)} · costo real ${plata(d.costoRealARS)}`,
+            el('small', {}, `Vuelve después, con un trámite: no se descuenta al pagar. Está explicado en el paso 4, como ${P.label}.`)) : null,
           d.faltan.length ? el('p', { class:'dz-r-nota' }, `Sin contar: ${d.faltan.join(', ').toLowerCase()}.`) : null]
         : el('div', { class:'dz-r-total vacio' }, el('span', {}, 'Total puesto en tu casa'), el('b', {}, '$ —'), el('small', {}, 'Cargá el precio para verlo')),
 
@@ -643,8 +734,13 @@ export function panelImportacion({ ir, producto = null, sugerido = null, alConfi
   function pintarConsejo(r){
     const c = r.consejo;
     const hayImportacion = r.pequeno.disponible || r.general.disponible;
-    poner(secConsejo, 
-      el('h2', {}, ic('estrella'), 'Qué te conviene'),
+    /* Enmarcado en verde: es la sugerencia de la app, y se explica de dónde sale. */
+    poner(secConsejo,
+      el('div', { class:'dz-consejo-cab' },
+        el('span', { class:'dz-consejo-sello' }, ic('estrella'), ' Sugerencia de NiJu'),
+        el('h2', {}, 'Qué te conviene')),
+      el('p', { class:'dz-consejo-por' },
+        `Con tus datos (${P.label}, ${s.destino === 'uso' ? 'para uso personal' : 'para vender'}, ${r.peso.toLocaleString('es-AR', { maximumFractionDigits:1 })} kg${s.unidades > 1 ? `, ${s.unidades} unidades` : ''}) comparamos todas las formas permitidas de traerlo, con los mismos números del desglose, y te marcamos la que sale menos puesta en tu casa y cómo hacerla. Es una recomendación: la decisión es tuya.`),
       !s.precio ? el('p', { class:'dz-sub' }, 'Cuando cargues el precio te decimos qué conviene.') : [
         el('h3', {}, c.titulo),
         c.motivos.length ? el('ul', {}, ...c.motivos.map(m => el('li', {}, m))) : null,
