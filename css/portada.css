@@ -32,6 +32,7 @@
 .p-slide::after{ width:220px; height:220px; right:34%; bottom:-150px; background:rgba(255,255,255,.08); }
 .p-s-ofertas{ background:linear-gradient(115deg, #1f55cc, #3483fa 55%, #62a6ff); }
 .p-s-traelo { background:linear-gradient(115deg, #4c22c0, #8c52ff 58%, #b690ff); }
+.p-s-negocio{ background:linear-gradient(115deg, #b0179e, #7a2bd6 55%, #1fb6e8); }
 .p-s-final  { background:linear-gradient(115deg, #007a43, #00a650 58%, #3fd087); }
 .p-s-grupal { background:linear-gradient(115deg, #d44b10, #ff7733 58%, #ffa566); }
 

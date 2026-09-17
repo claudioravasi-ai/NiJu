@@ -209,7 +209,8 @@ svg.ic{ width:18px; height:18px; flex:0 0 18px; }
 /* Emblema (bolsa con tilde) + palabra. "Ju" va en azul para que el
    nombre tenga dos tiempos y se lea de un vistazo. */
 .emblema{ display:block; flex:0 0 auto; line-height:0; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
-.emblema svg{ display:block; width:100%; height:100%; }
+.emblema{ background:#fff; border-radius:24%; overflow:hidden; }
+.emblema img{ display:block; width:100%; height:100%; object-fit:cover; }
 .marca-texto{
   font-weight:800; letter-spacing:-.045em; color:var(--tx);
   font-family:var(--ff); line-height:1;

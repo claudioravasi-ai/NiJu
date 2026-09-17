@@ -426,26 +426,85 @@ export function vistaResultados(params, ir){
 
 const LO_MAS_BUSCADO = ['zapatillas', 'air fryer', 'notebook', 'smart tv', 'perfume', 'celular', 'taladro', 'aceite de girasol'];
 
-/** Buscar sin palabra: buscador grande, lo más buscado, tus últimas
-    búsquedas y las categorías. */
+/** Buscar sin palabra (rediseño 17-09-2026, pedido de Claudio: se veía
+    "aislada, sin bordes ni contención"). Todo va en tarjetas: buscador
+    grande con ejemplos que rotan, lo más buscado como ranking, tus últimas
+    búsquedas, tiendas en vivo para entrar a una, categorías y atajos a
+    los servicios de NiJu. */
 function inicioBusqueda(ir){
   const input = el('input', { type:'search', enterkeyhint:'search', placeholder:'¿Qué estás buscando?', 'aria-label':'Qué estás buscando' });
   const buscarAhora = texto => { const t = (texto ?? input.value).trim(); if (t) ir(`#/buscar?q=${encodeURIComponent(t)}`); };
   input.addEventListener('keydown', e => { if (e.key === 'Enter') buscarAhora(); });
-  const recientes = (store.get('historial') || []).map(h => typeof h === 'string' ? h : h?.q).filter(Boolean).slice(0, 6);
-  const chips = lista => el('div', { class:'k2-chips' }, ...lista.map(t => el('button', { class:'v-chip', onclick:() => buscarAhora(t) }, t)));
   setTimeout(() => input.focus({ preventScroll:true }), 50);
+
+  /* El placeholder va mostrando ejemplos, como invitación a escribir */
+  let k = 0;
+  const rotar = setInterval(() => {
+    if (!input.isConnected) return clearInterval(rotar);
+    if (document.activeElement !== input || !input.value) input.placeholder = `Probá con "${LO_MAS_BUSCADO[k++ % LO_MAS_BUSCADO.length]}"`;
+  }, 2600);
+
+  const recientesDe = () => (store.get('historial') || []).map(h => typeof h === 'string' ? h : h?.q).filter(Boolean)
+    .filter((q, i, a) => a.indexOf(q) === i).slice(0, 6);
+  const cajaRecientes = el('div');
+  const pintarRecientes = () => {
+    const recientes = recientesDe();
+    cajaRecientes.replaceChildren(...(recientes.length ? [
+      el('div', { class:'vi-card-cab' }, el('h2', {}, ic('refrescar'), 'Tus últimas búsquedas'),
+        el('button', { class:'p-link tiny', onclick:() => { store.set('historial', []); pintarRecientes(); } }, 'Borrar')),
+      el('div', { class:'vi-recientes' }, ...recientes.map(t => el('button', { class:'vi-reciente', onclick:() => buscarAhora(t) },
+        ic('buscar'), el('span', {}, t), ic('der'))))
+    ] : [
+      el('div', { class:'vi-card-cab' }, el('h2', {}, ic('refrescar'), 'Tus últimas búsquedas')),
+      el('p', { class:'vi-vacio' }, 'Todavía no buscaste nada. Lo que busques va a quedar acá para volver con un toque.')]));
+  };
+  pintarRecientes();
+
+  const tiendas = tiendasActivas().filter(t => t.tipo !== 'propio').sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const filtroTiendas = el('input', { class:'vi-filtro', type:'search', placeholder:'Filtrar tiendas…', 'aria-label':'Filtrar tiendas' });
+  const gridTiendas = el('div', { class:'vi-tiendas' });
+  const pintarTiendas = () => {
+    const q = filtroTiendas.value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const vistas = tiendas.filter(t => t.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(q));
+    gridTiendas.replaceChildren(...(vistas.length ? vistas.map(t => el('button', { class:'vi-tienda', title:`Recorrer ${t.nombre}`, onclick:() => ir(`#/tienda/${t.id}`) },
+      logoTienda(t.id, true), el('span', {}, t.nombre))) : [el('p', { class:'vi-vacio' }, 'Ninguna tienda con ese nombre.')]));
+  };
+  filtroTiendas.addEventListener('input', pintarTiendas);
+  pintarTiendas();
+
+  const servicio = (icono, titulo, texto, ruta) => el('button', { class:'vi-servicio', onclick:() => ir(ruta) },
+    el('span', { class:'vi-servicio-ic' }, ic(icono)), el('b', {}, titulo), el('small', {}, texto), el('span', { class:'vi-flecha' }, ic('der')));
 
   return el('div', { class:'wrap v-inicio' },
     el('section', { class:'v-inicio-hero' },
+      el('span', { class:'vi-kicker' }, el('i'), `${tiendas.length} tiendas en vivo`),
       el('h1', {}, '¿Qué buscás hoy?'),
       el('p', {}, 'Lo buscamos en todas las tiendas a la vez y te mostramos dónde sale más barato, con el precio final a la vista.'),
-      el('div', { class:'v-inicio-buscar' }, ic('buscar'), input, el('button', { onclick:() => buscarAhora() }, 'Buscar'))),
-    recientes.length ? [el('h2', {}, 'Tus últimas búsquedas'), chips(recientes)] : null,
-    el('h2', {}, 'Lo más buscado'), chips(LO_MAS_BUSCADO),
-    el('h2', {}, 'O entrá por categoría'),
-    el('div', { class:'v-inicio-cats' }, ...RUBROS.map(r => el('button', { class:'p-cat', style:`--rc:${r.color}`, onclick:() => ir(`#/buscar?rubro=${r.id}`) },
-      el('span', { class:'p-cat-ic' }, r.emo), el('b', {}, r.nombre)))));
+      el('div', { class:'v-inicio-buscar' }, ic('buscar'), input, el('button', { onclick:() => buscarAhora() }, 'Buscar')),
+      el('div', { class:'vi-pasos' }, ...[['buscar', 'Escribís una vez'], ['mundo', 'Comparamos todas'], ['etiqueta', 'Ves el precio final']]
+        .map(([i, t]) => el('span', {}, ic(i), t)))),
+
+    el('div', { class:'vi-grilla' },
+      el('section', { class:'vi-card' },
+        el('div', { class:'vi-card-cab' }, el('h2', {}, ic('rayo'), 'Lo más buscado')),
+        el('ol', { class:'vi-ranking' }, ...LO_MAS_BUSCADO.map((t, n) => el('li', {},
+          el('button', { onclick:() => buscarAhora(t) }, el('b', { class:'vi-n' }, String(n + 1)), el('span', {}, t), ic('der')))))),
+      el('section', { class:'vi-card' }, cajaRecientes)),
+
+    el('section', { class:'vi-card' },
+      el('div', { class:'vi-card-cab' }, el('h2', {}, ic('casa'), 'Entrá por categoría')),
+      el('div', { class:'v-inicio-cats' }, ...RUBROS.map(r => el('button', { class:'p-cat vi-cat', style:`--rc:${r.color}`, onclick:() => ir(`#/buscar?rubro=${r.id}`) },
+        el('span', { class:'p-cat-ic' }, r.emo), el('b', {}, r.nombre))))),
+
+    el('section', { class:'vi-card' },
+      el('div', { class:'vi-card-cab' }, el('h2', {}, ic('tienda'), 'Comprar por tienda'), filtroTiendas),
+      gridTiendas),
+
+    el('section', { class:'vi-servicios' },
+      servicio('envio', 'Traelo por mí', 'Pegá un link de cualquier tienda del mundo', '#/pedido'),
+      servicio('estrella', 'Hacemos tu negocio', 'Tu idea, con estudio de mercado y financiación', '#/negocio'),
+      servicio('usuario', 'Compra grupal', 'Juntos compramos más barato', '#/grupal'),
+      servicio('megafono', 'Pedí y que compitan', 'Publicá lo que buscás y te ofertan', '#/demanda')));
 }
 
 const textoRango = (min, max) =>

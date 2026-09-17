@@ -27,7 +27,7 @@ async function api(ruta, { metodo = 'GET', cuerpo, comoDueno = false } = {}){
   return d;
 }
 
-export const TIPOS_SOLICITUD = { exportar:'Vendé al mundo', desarrollo:'App o web a medida' };
+export const TIPOS_SOLICITUD = { exportar:'Vendé al mundo', desarrollo:'App o web a medida', negocio:'Hacemos tu negocio' };
 
 export const enviarSolicitud = (tipo, datos) => api('', { metodo:'POST', cuerpo:{ tipo, datos } });
 export const listarSolicitudes = async () => (await api('', { comoDueno:true })).solicitudes || [];

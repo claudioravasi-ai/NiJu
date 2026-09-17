@@ -19,6 +19,7 @@ import { vistaGrupal } from './ui/grupal.js';
 import { vistaDemanda } from './ui/demanda.js';
 import { vistaExportar } from './ui/exportar.js';
 import { vistaDesarrollo } from './ui/desarrollo.js';
+import { vistaNegocio } from './ui/negocio.js';
 import { vistaTienda } from './ui/tienda.js';
 import { esDueno, entrar, salir, verificarClave } from './engine/sesion.js';
 import { vistaCarrito } from './ui/carrito.js';
@@ -36,6 +37,7 @@ import { iniciarIdioma, idioma, cambiarIdioma, IDIOMAS } from './i18n.js';
 
 const NAV = [
   { ruta:'#/',          icono:'casa',     label:'Inicio' },
+  { ruta:'#/negocio',   icono:'estrella', label:'Hacemos tu negocio', destacado:true },
   { ruta:'#/buscar',    icono:'buscar',   label:'Buscar' },
   { ruta:'#/pedido',    icono:'envio',    label:'Traelo por mí' },
   { ruta:'#/impuestos', icono:'calc',     label:'Impuestos' },
@@ -62,23 +64,14 @@ const ir = ruta => { location.hash = ruta; };
 
 
 /* ------------------------------------------------------------------
-   Identidad: un emblema y la palabra NiJu al lado.
-   El emblema es una bolsa de compras con un tilde (lo compramos por
-   vos) y un punto verde (ya llega). Va en vector, así se ve nítido a
-   cualquier tamaño y en modo día y noche. Reemplazó al isotipo del pez:
-   a 30 píxeles no se reconocía.
+   Identidad: el isotipo "NJ" en degradé (logo que pasó Claudio el
+   17-09-2026, assets/logo-niju-original.jpg) y la palabra NiJu al lado.
+   Reemplazó al emblema de la bolsa. El recorte de la marca, sin el texto
+   de abajo, está en assets/isotipo-nj.jpg.
    ------------------------------------------------------------------ */
-const EMBLEMA_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true">
-  <rect width="48" height="48" rx="13" fill="#3483fa"/>
-  <path d="M19 19.5v-3.2a5 5 0 0 1 10 0v3.2" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-  <path d="M13.5 19h21l-1.7 17.6a3 3 0 0 1-3 2.7H18.2a3 3 0 0 1-3-2.7Z" fill="#fff"/>
-  <path d="M19.3 29.4l3.2 3.2 6.2-6.6" fill="none" stroke="#3483fa" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="37.5" cy="11" r="6.2" fill="#00a650" stroke="#fff" stroke-width="2.6"/>
-</svg>`;
-
 function logoNiju(clase){
   return el('span', { class:'marca ' + clase, role:'img', 'aria-label':'NiJu' },
-    el('span', { class:'emblema', html:EMBLEMA_SVG }),
+    el('span', { class:'emblema' }, el('img', { src:'./assets/isotipo-nj.jpg', alt:'', width:'48', height:'48', decoding:'async' })),
     el('span', { class:'marca-texto' }, 'Ni', el('b', {}, 'Ju')));
 }
 
@@ -134,7 +127,7 @@ function construirShell(){
         el('div', { class:'brand-sub' }, 'compra todo, de todo y para todo')),
       fijar),
     ...NAV.filter(n => !n.privado || esDueno()).flatMap(n => {
-      const item = el('button', { class:'nav-item', data:{ ruta:n.ruta }, onclick:() => { cerrarMenu(); ir(n.ruta); } },
+      const item = el('button', { class:'nav-item' + (n.destacado ? ' nav-destacado' : ''), data:{ ruta:n.ruta }, onclick:() => { cerrarMenu(); ir(n.ruta); } },
         ic(n.icono), el('span', { class:'spacer' }, n.label),
         n.ruta === '#/carrito' ? el('span', { class:'tiny mono', data:{ badge:'carrito' } }, '') : null);
       return n.ruta === '#/buscar' ? [item, porTienda.nodo] : [item];
@@ -392,6 +385,7 @@ function rutear({ buscador }){
   } else if (ruta === '/demanda'){  vista.replaceChildren(vistaDemanda(ir));
   } else if (ruta === '/exportar'){ vista.replaceChildren(vistaExportar(ir));
   } else if (ruta === '/desarrollo'){ vista.replaceChildren(vistaDesarrollo(ir));
+  } else if (ruta === '/negocio'){  vista.replaceChildren(vistaNegocio(ir));
   } else if (ruta === '/carrito'){  vista.replaceChildren(vistaCarrito(ir));
   } else if (ruta === '/cuenta'){   vista.replaceChildren(vistaCuenta(ir));
   } else if (ruta === '/compras'){  vista.replaceChildren(vistaMisCompras(ir));
@@ -494,7 +488,7 @@ function piePagina(){
           el('label', {}, 'Idioma', el('select', { 'aria-label':'Idioma', 'data-no-traducir':'1', onchange:e => cambiarIdioma(e.target.value) },
             ...IDIOMAS.map(([id, nombre]) => el('option', { value:id, selected:idioma() === id || null }, nombre)))))),
       el('div', {}, el('h4', {}, 'Comprar'), el('ul', {},
-        enlace('Buscar en todas las tiendas', '#/buscar'), enlace('Traelo por mí', '#/pedido'), enlace('Compras grandes', '#/grandes'),
+        enlace('Buscar en todas las tiendas', '#/buscar'), enlace('Hacemos tu negocio', '#/negocio'), enlace('Traelo por mí', '#/pedido'), enlace('Compras grandes', '#/grandes'),
         enlace('Compra grupal', '#/grupal'), enlace('Por mayor', '#/mayorista'), enlace('Pedí y que compitan', '#/demanda'),
         enlace('Vendé al mundo', '#/exportar'), enlace('Apps y webs a medida', '#/desarrollo'))),
       el('div', {}, el('h4', {}, 'Ayuda'), el('ul', {},

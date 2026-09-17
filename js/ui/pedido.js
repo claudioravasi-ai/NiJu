@@ -52,7 +52,11 @@ function leerLink(u){
     .map(p => decodeURIComponent(p).replace(/\.html?$/i, '').replace(/-(p|g)-\d+.*$/i, ''))
     .filter(p => /[a-z]/i.test(p) && p.split('-').length >= 3 && !/^(dp|item|gp|product|goods)$/i.test(p))[0];
   const titulo = tramo ? tramo.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
-  return { titulo, origen:DESDE_CHINA.test(host) ? 'china' : /amazon\.com$|ebay\.com$|walmart|bestbuy/i.test(host) ? 'eeuu' : null,
+  const origen = DESDE_CHINA.test(host) ? 'china' : /amazon\.com$|ebay\.com$|walmart|bestbuy/i.test(host) ? 'eeuu'
+    : /\.(com\.br|br|uy|com\.uy|py|com\.py)$|mercadolivre/i.test(host) ? 'mercosur'
+    : /\.(es|de|fr|it|nl|pt|be|at|ie|pl|se|co\.uk|uk)$/i.test(host) ? 'europa'
+    : /\.(jp|co\.jp|kr|co\.kr|in|co\.in|ca|mx|com\.mx|au|com\.au|cl|co)$/i.test(host) ? 'mundo' : null;
+  return { titulo, origen,
     tienda:{ nombre, tipo:/\.ar$/.test(host) ? 'nacional' : 'internacional', moneda:/\.ar$/.test(host) ? 'ARS' : 'USD' } };
 }
 
@@ -70,7 +74,7 @@ function esOtroProducto(delLink, leido){
 }
 
 /* Hasta 25 segundos y un reintento: una red lenta del teléfono no es un error. */
-async function pedirResolver(u){
+export async function pedirResolver(u){
   for (let intento = 1; ; intento++){
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 25000);
@@ -257,7 +261,7 @@ export function vistaPedido(ir){
           ? { titulo:form.titulo, precio:form.precio, moneda:form.moneda, descripcion:datos.descripcion || '', marca:datos.marca || '', tienda:form.tienda, url:form.url, imagen:form.imagen,
               pesoKg:datos.pesoKg || null, medidasCm:datos.medidasCm || null }
           : null,
-          sugerido:leido ? null : { titulo:form.titulo, origen:form.origen, tienda:form.tienda, url:form.url } });
+          sugerido:leido ? { origen:leerLink(form.url || '').origen } : { titulo:form.titulo, origen:form.origen, tienda:form.tienda, url:form.url } });
         Object.assign(panel, { clave, memoria });
       }
       if (leido) panel.actualizarPrecio(form.precio, form.moneda);
@@ -441,6 +445,23 @@ export function vistaPedido(ir){
 
   pintar();
   raiz.append(cuerpo);
+
+  /* Viene de "Hacemos tu negocio" → "Traémelo": entra con todo cargado. */
+  let desdeNegocio = null;
+  try{ desdeNegocio = JSON.parse(sessionStorage.getItem('niju.desdeNegocio') || 'null'); sessionStorage.removeItem('niju.desdeNegocio'); }catch{}
+  if (desdeNegocio){
+    olvidarActual();
+    const x = desdeNegocio;
+    if (x.url && x.precio == null){ link.value = x.url; setTimeout(buscarLink, 0); }
+    else if (x.titulo){
+      link.value = x.url || '';
+      datos = { ok:true, leido:true, titulo:x.titulo, precio:x.precio ?? null, moneda:x.moneda || 'USD', imagen:x.imagen, url:x.url || '',
+        tienda:x.tienda || { nombre:'Tienda externa', tipo:'internacional', moneda:x.moneda || 'USD' }, pesoKg:x.pesoKg || null };
+      pintarEncontrado(datos);
+    }
+    setTimeout(() => estado.scrollIntoView({ block:'start' }), 80);
+    return raiz;
+  }
 
   /* Vuelve al producto que se estaba cotizando (vence en un día). */
   try{

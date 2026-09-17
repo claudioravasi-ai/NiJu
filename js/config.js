@@ -5,7 +5,7 @@ export const CONFIG = {
   nombre: 'NiJu',
   claim: 'Comprá todo, de todo y para todo.',
   claimLargo: 'Un solo lugar. Una app. El mundo a tus dedos: sin trámites, sin riesgos, del deseo a tu casa.',
-  version: '0.4.6',
+  version: '0.5.0',
 
   /** Datos del titular para los términos y el pie. Se completan al
       constituir la empresa (y con ellos, el Data Fiscal de ARCA). */
@@ -30,6 +30,17 @@ export const CONFIG = {
       pagarlo. Con false, la NCM se busca en el Arancel y las preguntas las
       responde el asesor local (engine/asesor.js), gratis. */
   asistenteIA: false,
+
+  /** "Hacemos tu negocio": estudio con IA gratuita (Gemini, capa gratis de
+      Google AI Studio) por el worker. Sin GEMINI_API_KEY en Cloudflare, la
+      app hace el estudio con su motor propio y lo avisa. No tiene costo. */
+  iaNegocio: true,
+
+  /** Cotización en vivo de un agente de importación tercerizado, con la
+      marca NiJu. El servidor la pide SOLO si tiene AGENTE_URL y AGENTE_TOKEN,
+      que entrega el agente al firmar el acuerdo. Hasta entonces, NiJu
+      Importación se calcula con el motor propio y así se dice. */
+  agenteImportacion: true,
 
   /** Backend propio (ver backend/DESPLIEGUE.md). */
   api: 'https://niju-api.claudio-ravasi.workers.dev/v1',

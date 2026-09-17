@@ -41,6 +41,12 @@ export function vistaHome(ir){
   const bajadaOferta = el('p', {}, 'Buscás una vez y te mostramos dónde sale más barato, con el precio final puesto en tu casa.');
 
   const slides = [
+    slide('p-s-negocio', 'Hacemos tu negocio', el('h2', {}, 'Tenés una idea: nosotros la hacemos realidad'),
+      el('p', {}, 'Máquinas en lugares, una pyme, mercadería para tu local sin tener la plata. Estudiamos el mercado, armamos los números y lo hacemos con vos.'),
+      el('button', { class:'p-cta', onclick:() => ir('#/negocio') }, 'Contanos tu idea', ic('der')),
+      el('div', { class:'p-slide-cuenta' },
+        ...['Estudio de mercado', 'Financiación', 'Sociedad', 'Importación'].map(t => el('div', {}, ic('check'), t)),
+        el('div', { class:'p-slide-total' }, 'Tu negocio'))),
     slide('p-s-ofertas', 'Comparado en vivo', tituloOferta, bajadaOferta,
       el('button', { class:'p-cta', onclick:() => ofertasSec.scrollIntoView({ behavior:'smooth', block:'start' }) }, 'Ver ofertas', ic('der')),
       fotosOferta),

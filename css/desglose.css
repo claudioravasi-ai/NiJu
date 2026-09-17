@@ -280,3 +280,16 @@
 .dz-r-recupera small{ display:block; font-size:11.5px; color:var(--tx-2); margin-top:2px; }
 .dz-medidas{ grid-template-columns:repeat(3, minmax(0,1fr)); }
 @media (max-width:560px){ .dz-medidas{ grid-template-columns:minmax(0,1fr); } }
+
+/* ---------- 0.5.0: NCM automática, tasas, NiJu Importación y paso 4 ---------- */
+.dz-auto{ display:flex; align-items:center; gap:4px; margin:6px 0 0; font-size:13px; color:var(--ok); }
+.dz-auto .ic{ width:15px; height:15px; }
+.dz-tasas{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; margin:10px 0 4px; }
+.dz-tasas > div{ display:flex; flex-direction:column; padding:8px 10px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+.dz-tasas small{ color:var(--tx-2); font-size:12px; }
+.dz-tasas b{ font-size:16px; }
+.dz-tasas span{ color:var(--tx-2); font-size:11.5px; }
+.dz-agente{ margin-bottom:6px; }
+.dz-op-niju{ width:100%; border-width:2px; background:linear-gradient(100deg, color-mix(in srgb, #c21ec0 8%, var(--surface)), color-mix(in srgb, #1fb6e8 8%, var(--surface))); }
+.dz-oficial{ margin-top:16px; }
+.dz-oficial > summary{ font-weight:600; }
