@@ -76,10 +76,19 @@ minutos por consulta, alcanza de sobra para arrancar.
 4. En Cloudflare → tu Worker → **Settings → Variables and Secrets**, agregá:
    - `MELI_APP_ID` = el App ID
    - `MELI_SECRET` = el Secret
-5. En `js/config.js`, sumá `'meli'` a `tiendasReales`.
+5. **Deploy**. No hace falta tocar `js/config.js`: desde la 0.6.0 la app le
+   pregunta al servidor (`/v1/estado`) si tiene las claves de Mercado Libre y,
+   si las tiene, lo suma sola a la comparación.
 
 El Worker pide y renueva el token solo. Los tokens de Mercado Libre duran
 6 horas: si lo pegabas a mano, había que repegarlo tres veces por día.
+
+Desde 2025 Mercado Libre le niega a muchas apps nuevas la búsqueda de
+publicaciones (`/sites/MLA/search` responde 403 aunque el token sea bueno).
+Si pasa, el Worker busca en el catálogo (`/products/search`) y toma la
+publicación ganadora de cada producto: salen menos resultados, pero reales.
+Sin las claves, la ficha muestra un renglón "Buscar en Mercado Libre" que
+abre su búsqueda, sin inventar precio.
 
 ## B. El almacén KV (para compra grupal y bolsa de demanda)
 
@@ -178,3 +187,28 @@ worker.js), contadas en el KV `NIJU`, porque cada consulta tiene costo.
 
 El worker también sirve `/v1/arancel.zip`, una copia del Arancel Integrado
 de ARCA para cuando el navegador no llega al servidor de ARCA.
+
+
+## Hacemos tu negocio y NiJu Importación (v0.5.0)
+
+Pegá el `worker.js` nuevo (Edit code → reemplazar todo → Deploy). Sin eso:
+las solicitudes de "Hacemos tu negocio" contestan "tipo desconocido" (la app
+ofrece copiarlas para mandarlas por WhatsApp) y no hay IA.
+
+**IA gratuita (Gemini).** Opcional, sin costo en la capa gratuita de Google:
+
+1. Entrá a https://aistudio.google.com/apikey con una cuenta de Google y
+   tocá "Create API key".
+2. En Cloudflare: Workers → niju-api → Settings → Variables and Secrets →
+   Add → tipo **Secret**, nombre `GEMINI_API_KEY`, valor: la clave.
+3. Deploy. Tope: 20 estudios por IP por día (KV `NIJU`).
+
+Sin la clave, "Hacemos tu negocio" funciona igual con el motor propio y lo
+dice en pantalla. Las tasas del BCRA las lee el navegador directo (API
+pública, sin clave).
+
+**Agente de importación tercerizado.** Queda APAGADO hasta firmar un acuerdo:
+el agente entrega la dirección de su API y una clave. Recién ahí:
+`AGENTE_URL` (texto) y `AGENTE_TOKEN` (Secret). Mientras no estén, "NiJu
+Importación" se calcula con el motor propio de la app. No conectar el
+servidor privado de nadie sin permiso escrito.

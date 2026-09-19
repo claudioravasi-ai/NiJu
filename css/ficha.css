@@ -1,0 +1,339 @@
+/* ============================================================
+   NiJu — Ficha comparativa (v0.6.0)
+   El armado de los comparadores grandes (ComparaYa de referencia):
+   foto · título y resumen · caja de precio, solapas pegadas, ofertas
+   en renglones, historial en gráfico y relacionados en grilla.
+   Los colores son los de NiJu: azul para acciones, verde para lo
+   bueno, rojo para descuentos, y el modo noche gris.
+   ============================================================ */
+
+.fx{ --fx-r:14px; padding-bottom:30px; }
+.fx-card{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--fx-r);
+  padding:14px 16px; box-shadow:var(--shadow);
+}
+.fx-card-tit{ font-size:15px; font-weight:700; margin:0 0 10px; }
+.fx-link{ background:none; border:0; padding:0; color:var(--accion); font:inherit; font-size:13.5px; font-weight:600; cursor:pointer; }
+.fx-link:hover{ text-decoration:underline; }
+
+/* ---------- migas ---------- */
+.fx-miga{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--tx-2); margin:2px 0 14px; min-width:0; }
+.fx-miga a{ color:var(--tx-2); text-decoration:none; }
+.fx-miga a:hover{ color:var(--accion); }
+.fx-miga .v-volver{ margin:0 6px 0 0; }
+.fx-miga-tit{ color:var(--tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+
+/* ---------- arriba ---------- */
+.fx-hero{
+  display:grid; gap:18px 22px; align-items:start;
+  grid-template-columns:minmax(220px, .95fr) minmax(0, 1.3fr) 300px;
+  grid-template-areas:"foto info lado" "foto extra lado";
+  /* La fila de abajo absorbe lo que crezca la caja de precio (al abrir
+     el desglose): así el rango y las especificaciones no se despegan del título. */
+  grid-template-rows:auto 1fr;
+}
+.fx-hero > *{ min-width:0; }
+.fx-foto-card{ grid-area:foto; padding:14px; background:#fff; }
+.fx-info{ grid-area:info; display:flex; flex-direction:column; gap:10px; }
+.fx-lado{ grid-area:lado; display:flex; flex-direction:column; gap:12px; position:sticky; top:calc(var(--alto-cab, 58px) + 62px); }
+.fx-extra{ grid-area:extra; display:flex; flex-direction:column; gap:14px; }
+
+.fx-foto{ aspect-ratio:1; position:relative; }
+.fx-foto .fx-foto-img{ position:absolute; inset:0; width:100%; height:100%; border-radius:10px; overflow:hidden; }
+
+.fx-tienda{ display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:500; color:var(--tx-2); }
+.fx-tienda .slogo{ width:26px; height:26px; flex:0 0 26px; font-size:9px; }
+.fx-marca{ font-size:12.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--accion); }
+.fx-titulo{ font-size:clamp(21px, 2.3vw, 28px); line-height:1.25; font-weight:700; margin:0; text-transform:none; letter-spacing:-.01em; }
+
+.fx-resumen{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
+.fx-resumen > b{ margin-right:2px; }
+.fx-pill{
+  display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:10px;
+  font-size:12.5px; font-weight:500; background:var(--surface-2); color:var(--tx-2); white-space:nowrap;
+}
+.fx-pill.verde{ background:color-mix(in srgb, var(--win) 14%, transparent); color:var(--win-tx); font-weight:600; }
+.fx-pill.azul{ background:color-mix(in srgb, var(--accion) 12%, transparent); color:var(--accion); font-weight:600; }
+.fx-pill.naranja{ background:color-mix(in srgb, var(--niju) 15%, transparent); color:var(--niju); font-weight:600; }
+.fx-pill.violeta{ background:color-mix(in srgb, var(--int) 13%, transparent); color:var(--int); font-weight:600; }
+
+/* Favorito · Al carrito · Alerta de precio */
+.fx-acciones{ display:flex; flex-wrap:wrap; gap:8px; margin-top:2px; }
+.fx-accion{
+  --c:var(--accion);
+  display:inline-flex; align-items:center; gap:7px; padding:9px 16px; border-radius:var(--fx-r);
+  font:inherit; font-size:14px; font-weight:700; cursor:pointer; color:var(--c);
+  border:1px solid color-mix(in srgb, var(--c) 42%, transparent);
+  background:linear-gradient(color-mix(in srgb, var(--c) 5%, var(--surface)), color-mix(in srgb, var(--c) 14%, var(--surface)));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 1px 3px rgba(0,0,0,.12);
+  transition:transform .12s ease, box-shadow .12s ease;
+}
+.fx-accion:hover{ transform:translateY(-1px); box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 4px 10px rgba(0,0,0,.14); }
+.fx-accion .ic{ width:17px; height:17px; flex:0 0 17px; }
+.fx-accion.rosa{ --c:var(--social); }
+.fx-accion.naranja{ --c:var(--niju); }
+.fx-accion.violeta{ --c:var(--int); }
+.fx-accion.on{ background:var(--c); color:#fff; }
+.fx-accion.rosa.on .ic{ fill:currentColor; }
+
+/* N tiendas · M ofertas, del más barato al más caro */
+.fx-rango{ padding:12px 16px; }
+.fx-rango-top{ display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:600; margin-bottom:8px; }
+.fx-rango-fila{ display:flex; align-items:flex-end; gap:14px; }
+.fx-rango-fila small{ display:block; font-size:11.5px; color:var(--tx-3); }
+.fx-rango-fila b{ font-size:19px; font-weight:800; }
+.fx-verde{ color:var(--win-tx); }
+.fx-der{ text-align:right; }
+.fx-barra{ flex:1; height:6px; border-radius:99px; margin-bottom:8px; background:linear-gradient(90deg, var(--win), var(--warn), var(--bad)); }
+
+.fx-specs{ border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.fx-spec{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; padding:9px 14px; font-size:13.5px; }
+.fx-spec:nth-child(odd){ background:var(--surface-2); }
+.fx-spec span{ color:var(--tx-2); }
+.fx-spec b{ font-weight:500; overflow-wrap:anywhere; }
+
+/* ---------- caja de precio ---------- */
+.fx-caja{
+  display:flex; flex-direction:column; gap:8px; padding:16px; border-radius:16px;
+  background:color-mix(in srgb, var(--accion) 6%, var(--surface));
+  border:1px solid color-mix(in srgb, var(--accion) 28%, transparent);
+  box-shadow:var(--shadow-2);
+}
+.fx-caja-lbl{ font-size:12.5px; color:var(--tx-2); }
+.fx-caja-precio{ display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.fx-precio-xl{ font-size:31px; line-height:1.1; font-weight:800; color:var(--accion); letter-spacing:-.01em; }
+.fx-off{
+  display:inline-flex; align-items:center; padding:2px 7px; border-radius:8px; margin-top:4px;
+  background:var(--bad); color:#fff; font-size:12.5px; font-weight:700; white-space:nowrap;
+}
+.fx-tachado{ font-size:13px; color:var(--tx-3); text-decoration:line-through; }
+.fx-disp{ font-size:13.5px; color:var(--tx-2); }
+.fx-btn{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%;
+  padding:12px 16px; border-radius:var(--fx-r); font:inherit; font-size:15px; font-weight:600; cursor:pointer;
+  background:var(--surface); color:var(--accion); border:1px solid color-mix(in srgb, var(--accion) 30%, transparent);
+  transition:background .12s ease, transform .12s ease;
+}
+.fx-btn span{ flex:1; text-align:center; }
+.fx-btn:hover{ background:var(--accion-suave); }
+.fx-btn:active{ transform:translateY(1px); }
+.fx-btn-1{
+  background:var(--accion); color:var(--accion-tx); border-color:var(--accion);
+  box-shadow:0 10px 15px -3px color-mix(in srgb, var(--accion) 30%, transparent), 0 4px 6px -4px color-mix(in srgb, var(--accion) 30%, transparent);
+}
+.fx-btn-1:hover{ background:var(--accion-2); }
+
+/* Tarjetita "Historial 90d" */
+.fx-mini{
+  display:block; width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--fx-r); padding:10px 12px; box-shadow:var(--shadow);
+}
+.fx-mini:hover{ border-color:color-mix(in srgb, var(--accion) 40%, transparent); }
+.fx-mini-in{ display:flex; align-items:center; gap:12px; }
+.fx-mini-in > .ic{ color:var(--tx-3); }
+.fx-mini-txt{ flex:1; display:flex; flex-direction:column; align-items:flex-start; gap:3px; min-width:0; }
+.fx-mini-txt small{ font-size:11.5px; color:var(--tx-3); }
+.fx-chispa{ width:96px; height:40px; flex:0 0 96px; }
+.fx-chispa-l{ fill:none; stroke:var(--bad); stroke-width:2; }
+.fx-var{ display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:8px; font-size:12.5px; font-weight:700; background:var(--surface-2); color:var(--tx-2); }
+.fx-var .ic{ width:13px; height:13px; flex:0 0 13px; }
+.fx-var.sube{ background:color-mix(in srgb, var(--bad) 13%, transparent); color:var(--bad); }
+.fx-var.baja{ background:color-mix(in srgb, var(--win) 14%, transparent); color:var(--win-tx); }
+
+/* Con la gestión de NiJu */
+.fx-desglose{ padding:0; }
+.fx-desglose summary{
+  list-style:none; display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; font-size:13.5px;
+}
+.fx-desglose summary::-webkit-details-marker{ display:none; }
+.fx-desglose summary span{ flex:1; color:var(--tx-2); }
+.fx-desglose summary b{ font-size:15px; }
+.fx-desglose-fl{ transition:transform .15s ease; color:var(--tx-3); }
+.fx-desglose[open] .fx-desglose-fl{ transform:rotate(180deg); }
+.fx-desglose-cuerpo{ display:flex; flex-direction:column; gap:10px; padding:0 14px 14px; border-top:1px solid var(--line-soft); padding-top:10px; }
+
+/* ---------- solapas pegadas ---------- */
+.fx-tabs{
+  position:sticky; top:var(--alto-cab, 58px); z-index:15;
+  display:flex; gap:4px; overflow-x:auto; scrollbar-width:none;
+  margin:24px calc(-1 * clamp(14px, 2.6vw, 28px)) 0; padding:8px clamp(14px, 2.6vw, 28px);
+  background:color-mix(in srgb, var(--bg) 86%, transparent);
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+}
+.fx-tabs::-webkit-scrollbar{ display:none; }
+.fx-tab{
+  display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px; border:0; background:none;
+  font:inherit; font-size:14px; font-weight:500; color:var(--tx-2); cursor:pointer; white-space:nowrap;
+}
+.fx-tab:hover{ background:var(--accion-suave); color:var(--accion); }
+.fx-tab.on{ background:var(--accion-suave); color:var(--accion); font-weight:600; }
+.fx-cuenta{
+  display:inline-flex; align-items:center; justify-content:center; min-width:22px; padding:1px 7px; border-radius:99px;
+  font-size:11.5px; font-weight:700; background:color-mix(in srgb, var(--accion) 14%, transparent); color:var(--accion);
+}
+.fx-cuenta[hidden]{ display:none; }
+
+.fx-sec{ margin-top:26px; scroll-margin-top:calc(var(--alto-cab, 58px) + 66px); }
+.fx-h2{ font-size:20px; font-weight:700; margin:0 0 12px; text-transform:none; letter-spacing:-.01em; }
+
+/* ---------- filtros ---------- */
+.fx-barra-filtros{
+  display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px; border-radius:var(--fx-r);
+  background:var(--surface-2);
+}
+.fx-select{
+  font:inherit; font-size:13.5px; padding:7px 10px; border-radius:10px; border:1px solid var(--line-firme);
+  background:var(--surface); color:var(--tx); min-width:190px;
+}
+.fx-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.fx-chip{
+  font:inherit; font-size:12.5px; font-weight:500; padding:4px 10px; border-radius:10px; cursor:pointer; white-space:nowrap;
+  background:color-mix(in srgb, var(--accion) 11%, transparent); color:var(--accion);
+  border:1px solid color-mix(in srgb, var(--accion) 30%, transparent);
+}
+.fx-chip:hover{ background:color-mix(in srgb, var(--accion) 18%, transparent); }
+.fx-chip.on{ background:var(--accion); color:#fff; border-color:var(--accion); }
+.fx-chip.gris{ background:var(--surface); color:var(--tx-2); border-color:var(--line-firme); }
+.fx-chip.gris:hover{ border-color:var(--bad); color:var(--bad); }
+.fx-chip.gris.on{ background:color-mix(in srgb, var(--bad) 10%, var(--surface)); color:var(--bad); border-color:var(--bad); text-decoration:line-through; }
+.fx-excluir{
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:10px; padding:8px 10px;
+  border-radius:var(--fx-r); background:var(--surface-2); font-size:12.5px; color:var(--tx-2);
+}
+.fx-excluir[hidden]{ display:none; }
+.fx-excluir > span{ margin-right:4px; }
+
+/* ---------- ofertas en renglones ---------- */
+.fx-ofertas{ display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.fx-of{
+  display:flex; justify-content:space-between; gap:16px; padding:12px 14px; border-radius:var(--fx-r);
+  border:1px solid var(--line); background:var(--surface); transition:box-shadow .12s ease;
+}
+.fx-of:hover{ box-shadow:var(--shadow-2); }
+.fx-of.barato{ background:color-mix(in srgb, var(--accion) 9%, var(--surface)); border-color:color-mix(in srgb, var(--accion) 38%, transparent); }
+.fx-of.tuyo{ background:color-mix(in srgb, var(--win) 11%, var(--surface)); border-color:color-mix(in srgb, var(--win) 42%, transparent); }
+.fx-of-izq{ min-width:0; flex:1; display:flex; flex-direction:column; gap:5px; }
+.fx-of-tienda{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:14px; }
+.fx-of-tienda .slogo{ width:24px; height:24px; flex:0 0 24px; font-size:8.5px; }
+.fx-sello{ padding:2px 7px; border-radius:6px; font-size:10px; font-weight:800; letter-spacing:.04em; color:#fff; }
+.fx-sello.azul{ background:var(--accion); }
+.fx-sello.verde{ background:var(--win); }
+.fx-of-tit{ font-size:13px; color:var(--tx-2); line-height:1.4; }
+.fx-of-sellos{ display:flex; flex-wrap:wrap; gap:5px; }
+.fx-of-sellos .fx-pill{ font-size:11.5px; padding:3px 8px; border-radius:8px; }
+.fx-of-der{ display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex:0 0 auto; text-align:right; }
+.fx-of-precio{ display:flex; align-items:center; gap:7px; }
+.fx-of-precio b{ font-size:21px; font-weight:800; letter-spacing:-.01em; }
+.fx-of-precio .fx-off{ margin-top:0; }
+.fx-of.barato .fx-of-precio b{ color:var(--accion); }
+.fx-of.tuyo .fx-of-precio b{ color:var(--win-tx); }
+.fx-rel{ font-size:12px; font-weight:700; }
+.fx-rel.sube{ color:var(--niju); }
+.fx-rel.baja{ color:var(--win-tx); }
+.fx-nota{ font-size:11.5px; color:var(--tx-3); }
+.fx-of-btns{ display:flex; align-items:center; gap:6px; margin-top:6px; }
+.fx-ir{
+  font:inherit; font-size:12.5px; font-weight:600; padding:7px 12px; border-radius:10px; cursor:pointer; white-space:nowrap;
+  border:0; background:var(--surface-2); color:var(--tx);
+}
+.fx-ir:hover{ filter:brightness(.95); }
+.fx-ir.azul{ background:var(--accion); color:#fff; }
+.fx-ir.verde{ background:var(--win); color:#fff; }
+.fx-ir.amarillo{ background:var(--cab); color:var(--cab-tx); }
+.fx-ojo{ display:inline-grid; place-items:center; width:30px; height:30px; border:0; background:none; border-radius:8px; color:var(--tx-3); cursor:pointer; }
+.fx-ojo:hover{ background:var(--surface-2); color:var(--tx); }
+.fx-ojo .ic{ width:16px; height:16px; }
+.fx-of-ml{ border-style:dashed; }
+.fx-of-vacio{ padding:18px; text-align:center; color:var(--tx-3); font-size:14px; }
+.fx-mas{
+  align-self:center; font:inherit; font-size:14px; font-weight:600; padding:9px 18px; border-radius:var(--fx-r); cursor:pointer;
+  background:var(--surface); color:var(--accion); border:1px solid color-mix(in srgb, var(--accion) 30%, transparent);
+}
+.fx-mas:hover{ background:var(--accion-suave); }
+.fx-ofertas > .fx-link{ align-self:center; }
+
+/* ---------- historial ---------- */
+.fx-hist{ padding:16px 18px; }
+.fx-hist-cab{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+.fx-hist-cab .fx-card-tit{ margin:0; }
+.fx-leyenda{ display:flex; gap:14px; font-size:12.5px; color:var(--tx-2); }
+.fx-leyenda span{ display:inline-flex; align-items:center; gap:6px; }
+.fx-ley-linea{ width:22px; height:0; border-top:2.5px solid var(--accion); }
+.fx-ley-linea.punteada{ border-top:2px dashed var(--tx-3); }
+.fx-graf-caja{ position:relative; margin-top:10px; }
+.fx-graf{ width:100%; height:auto; display:block; overflow:visible; }
+.fx-graf-grilla{ stroke:var(--line); stroke-width:1; stroke-dasharray:3 3; }
+.fx-graf-eje{ fill:var(--tx-3); font-size:11px; font-family:var(--ff); }
+.fx-graf-min{ fill:none; stroke:var(--accion); stroke-width:2.5; stroke-linejoin:round; }
+.fx-graf-prom{ fill:none; stroke:var(--tx-3); stroke-width:1.6; stroke-dasharray:5 4; }
+.fx-graf-guia{ stroke:var(--tx-3); stroke-width:1; }
+.fx-graf-p1{ fill:var(--accion); stroke:var(--surface); stroke-width:2; }
+.fx-graf-p2{ fill:var(--tx-3); stroke:var(--surface); stroke-width:2; }
+.fx-globo{
+  position:absolute; top:6px; min-width:150px; padding:8px 10px; border-radius:10px; pointer-events:none;
+  background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow-2);
+  display:flex; flex-direction:column; gap:2px; font-size:12.5px;
+}
+.fx-globo[hidden]{ display:none; }
+.fx-globo small{ color:var(--tx-3); }
+.fx-hist-vacio{
+  display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; padding:34px 16px;
+  margin-top:10px; border-radius:12px; background:var(--surface-2); color:var(--tx-2); font-size:13.5px;
+}
+.fx-hist-vacio .ic{ width:28px; height:28px; color:var(--accion); }
+.fx-hist-vacio b{ color:var(--tx); font-size:14.5px; }
+.fx-hist-pie{ text-align:center; font-size:12px; color:var(--tx-3); margin:10px 0 0; }
+
+/* ---------- relacionados ---------- */
+.fx-grilla{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; margin-top:14px; }
+.fx-grilla > .fx-of-vacio{ grid-column:1 / -1; }
+.fx-rc{
+  display:flex; flex-direction:column; gap:6px; padding:12px; border-radius:var(--fx-r); cursor:pointer; min-width:0;
+  border:1px solid var(--line); background:var(--surface); transition:box-shadow .15s ease, transform .15s ease;
+}
+.fx-rc:hover{ box-shadow:var(--shadow-2); transform:translateY(-2px); }
+.fx-rc-top{ display:flex; justify-content:space-between; align-items:center; gap:6px; min-height:24px; }
+.fx-rc-top .fx-off{ margin:0; }
+.fx-rc-tienda{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--tx-2); min-width:0; }
+.fx-rc-tienda .slogo{ width:20px; height:20px; flex:0 0 20px; font-size:7.5px; }
+.fx-rc-foto{ aspect-ratio:1; border-radius:10px; overflow:hidden; background:#fff; }
+.fx-rc-tit{ font-size:13.5px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.7em; }
+.fx-rc-precio{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; }
+.fx-rc-precio b{ font-size:19px; font-weight:800; }
+.fx-rc-precio s{ font-size:12.5px; color:var(--tx-3); }
+.fx-rc .fx-var{ align-self:flex-start; }
+.fx-rc-cuotas{ font-size:12.5px; font-weight:600; color:var(--accion); }
+.fx-rc-envio{ font-size:12.5px; font-weight:600; color:var(--win-tx); }
+.fx-rc-pie{ display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:auto; padding-top:6px; font-size:12px; }
+.fx-stock{ display:inline-flex; align-items:center; gap:5px; color:var(--win-tx); font-weight:600; }
+.fx-stock::before{ content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.fx-stock.no{ color:var(--tx-3); }
+.fx-entiendas{
+  display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:8px; font-weight:600;
+  background:color-mix(in srgb, var(--accion) 11%, transparent); color:var(--accion);
+}
+.fx-entiendas .ic{ width:13px; height:13px; flex:0 0 13px; }
+
+.fx-texto{ margin-top:26px; }
+.fx-texto h3{ font-size:15px; margin:0 0 6px; }
+.fx-texto p{ margin:0; font-size:13.5px; color:var(--tx-2); line-height:1.55; }
+
+/* ---------- pantallas medianas y teléfono ---------- */
+@media (max-width:1180px){
+  .fx-hero{ grid-template-columns:minmax(200px, .8fr) minmax(0, 1.2fr); grid-template-areas:"foto info" "foto lado" "extra extra"; grid-template-rows:auto 1fr auto; }
+  .fx-lado{ position:static; }
+}
+@media (max-width:760px){
+  .fx-hero{ grid-template-columns:minmax(0, 1fr); grid-template-areas:"foto" "info" "lado" "extra"; grid-template-rows:none; }
+  .fx-foto-card{ max-width:420px; width:100%; justify-self:center; }
+  .fx-of{ flex-direction:column; gap:8px; }
+  .fx-of-der{ flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:flex-start; gap:4px 10px; text-align:left; }
+  .fx-of-btns{ width:100%; margin-top:2px; }
+  .fx-of-btns .fx-ir:first-child{ flex:1; }
+  .fx-select{ min-width:0; width:100%; }
+  .fx-grilla{ grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+  .fx-rc{ padding:10px; }
+  .fx-rc-precio b{ font-size:16px; }
+  .fx-leyenda{ font-size:11.5px; }
+}

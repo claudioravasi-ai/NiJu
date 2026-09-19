@@ -117,7 +117,12 @@ export function ic(nombre, cls = 'ic'){
     tienda:'M3 9 4.5 4h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6',
     refrescar:'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
     ayuda:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',
-    documento:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 13h8M8 17h8M8 9h2'
+    documento:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 13h8M8 17h8M8 9h2',
+    externo:'M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
+    ojoNo:'M9.9 4.2A9.8 9.8 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.7 2.7M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6M14.1 14.1a3 3 0 1 1-4.2-4.2M2 2l20 20',
+    pulso:'M22 12h-4l-3 9L9 3l-3 9H2',
+    baja:'M12 5v14M19 12l-7 7-7-7',
+    sube:'M12 19V5M5 12l7-7 7 7'
   };
   const d = P[nombre] || P.x;
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');

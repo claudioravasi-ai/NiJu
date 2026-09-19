@@ -28,6 +28,10 @@
      GET  /v1/demanda/mis-ofertas  ← lo que ofertó un cliente como vendedor
      GET  /v1/demanda/foto/:id     ← foto de la oferta de un particular
      POST /v1/solicitudes          ← consulta de "Vendé al mundo" o presupuesto de app/web (público, 10 por IP por día)
+     POST /v1/negocio/ia           ← "Hacemos tu negocio": estudio de mercado o descripción de una foto con Gemini
+                                     (GEMINI_API_KEY, capa gratuita de Google AI Studio; 20 por IP por día)
+     POST /v1/agente/cotizar       ← cotización en vivo de un agente de importación tercerizado. Apagada hasta
+                                     cargar AGENTE_URL y AGENTE_TOKEN, que da el agente al firmar el acuerdo
      GET  /v1/solicitudes · POST /v1/solicitudes/:id/atendida   (solo el dueño)
      GET/POST /v1/demanda/proveedores · POST /v1/demanda/proveedores/:id/baja  (solo el dueño)
      GET  /v1/estado               ← qué tiene encendido el servidor (base, cuentas, emails)
@@ -39,7 +43,9 @@
    Variables de entorno (Settings → Variables, como "Secret"):
      EBAY_CLIENT_ID, EBAY_CLIENT_SECRET
      BESTBUY_KEY
-     MELI_TOKEN            (token OAuth de app registrada)
+     MELI_APP_ID, MELI_SECRET (app gratis en developers.mercadolibre.com.ar;
+                            el token se pide y se renueva solo)
+     MELI_TOKEN            (opcional: token a mano, para probar)
      ALI_APP_KEY, ALI_APP_SECRET, ALI_TRACKING_ID
      ORIGENES              (dominios permitidos, separados por coma)
      ADMIN_TOKEN           (clave del dueño: sin esto nadie crea campañas)
@@ -52,6 +58,11 @@
                              { accion:'preguntar', pregunta, contexto, historial }
      GET  /v1/arancel.zip  ← copia del Arancel Integrado de ARCA, por si ARCA
                              no responde al navegador
+     GET  /v1/historial?k= ← historial de precios de un producto, el mismo
+                             para todos los clientes
+     POST /v1/historial    ← { k, q, titulo, items:[{ tienda, id }] } anota el
+                             precio del día; el precio lo toma el servidor de
+                             su propia búsqueda, nunca del navegador
    ============================================================ */
 
 const TTL = 600;                    // 10 minutos de cache por consulta
@@ -82,7 +93,10 @@ export default {
       if (url.pathname === '/v1/resolver') return resolver(url, env, ctx, cors);
       if (url.pathname === '/v1/asesor')   return await asesor(req, env, cors);
       if (url.pathname.startsWith('/v1/solicitudes')) return await solicitudes(req, url, env, cors);
+      if (url.pathname === '/v1/negocio/ia')     return await negocioIA(req, env, cors);
+      if (url.pathname === '/v1/agente/cotizar') return await agenteCotizar(req, env, cors);
       if (url.pathname === '/v1/arancel.zip') return await arancelZip(cors);
+      if (url.pathname === '/v1/historial')  return await historial(req, url, env, cors);
       return json({ error:'ruta desconocida' }, cors, 404);
     }catch(e){
       return json({ error:String(e.message || e) }, cors, 500);
@@ -162,6 +176,89 @@ async function buscar(url, env, ctx, cors){
 }
 
 /* ============================================================
+   HISTORIAL DE PRECIOS — compartido entre todos los clientes
+   Antes cada teléfono guardaba el suyo y se perdía al recargar: nadie
+   veía nada. Ahora, cada vez que alguien abre la ficha de un producto,
+   el servidor anota el precio del día de cada tienda.
+   El precio NO lo manda el navegador (cualquiera podría inventarlo): el
+   navegador dice qué ofertas vio y con qué búsqueda, y el servidor las
+   busca en la copia de SU propia consulta a la tienda. Lo que no
+   encuentra, no se anota.
+   Una escritura por producto y por día, y solo si algo cambió.
+   ============================================================ */
+const HIST_SERIES = 60, HIST_PUNTOS = 180, HIST_ESCRITURAS_IP = 150;
+const claveHist = k => 'hist:' + String(k || '').toLowerCase().replace(/[^a-z0-9.+"-]/g, '').slice(0, 110);
+
+async function historial(req, url, env, cors){
+  const h = sinCache(cors);
+  if (!env.NIJU) return json({ error:'falta crear el almacén KV y enlazarlo como NIJU', series:{} }, h, 501);
+
+  if (req.method === 'GET'){
+    const k = url.searchParams.get('k');
+    if (!k) return json({ error:'falta k' }, h, 400);
+    return json(await leerKV(env, claveHist(k)) || { series:{} }, h);
+  }
+  if (req.method !== 'POST') return json({ error:'método no permitido' }, h, 405);
+
+  const b = await req.json().catch(() => ({}));
+  const k = claveHist(b.k);
+  const q = String(b.q || '').trim().slice(0, 200);
+  const items = Array.isArray(b.items) ? b.items.slice(0, 40) : [];
+  if (k.length < 8 || !q || !items.length) return json({ error:'faltan k, q o items' }, h, 400);
+
+  /* Precios verificados: de la búsqueda que el propio servidor guardó
+     (misma clave de caché que /v1/buscar con los valores de la ficha). */
+  const cache = caches.default;
+  const porTienda = new Map();
+  for (const it of items){
+    const t = String(it.tienda || '');
+    if (!ADAPTADORES[t]) continue;
+    if (!porTienda.has(t)) porTienda.set(t, new Set());
+    porTienda.get(t).add(String(it.id || ''));
+  }
+  const dia = new Date().toISOString().slice(0, 10);
+  const vistos = [];
+  await Promise.all([...porTienda.entries()].map(async ([t, ids]) => {
+    const hit = await cache.match(new Request(`https://cache.niju/${t}?q=${encodeURIComponent(q)}&r=&l=24&d=0`));
+    if (!hit) return;
+    const d = await hit.json().catch(() => null);
+    for (const o of (d?.ofertas || [])) if (ids.has(String(o.id)) && o.precio > 0) vistos.push(o);
+  }));
+
+  const doc = await leerKV(env, k) || { series:{} };
+  if (b.titulo && !doc.titulo) doc.titulo = String(b.titulo).slice(0, 160);
+  let cambio = false;
+  for (const o of vistos){
+    const sk = `${o.tiendaId}|${o.id}`.slice(0, 90);
+    const s = doc.series[sk] || { tienda:o.tiendaId, moneda:o.moneda, puntos:[] };
+    const ult = s.puntos[s.puntos.length - 1];
+    if (ult && ult[0] === dia){ if (ult[1] !== o.precio){ ult[1] = o.precio; cambio = true; } }
+    else { s.puntos.push([dia, o.precio]); cambio = true; }
+    if (s.puntos.length > HIST_PUNTOS) s.puntos = s.puntos.slice(-HIST_PUNTOS);
+    doc.series[sk] = s;
+  }
+  /* Tope de series: se quedan las que tienen dato más reciente. */
+  const claves = Object.keys(doc.series);
+  if (claves.length > HIST_SERIES){
+    claves.sort((a, b) => (doc.series[b].puntos.at(-1)?.[0] || '').localeCompare(doc.series[a].puntos.at(-1)?.[0] || ''))
+          .slice(HIST_SERIES).forEach(c => delete doc.series[c]);
+  }
+
+  if (cambio){
+    /* Freno por IP en la caché (no gasta escrituras de KV): nadie puede
+       agotar el cupo diario de la base abriendo miles de fichas. */
+    const ip = req.headers.get('CF-Connecting-IP') || 'x';
+    const marca = new Request(`https://cache.niju/hist-ip/${encodeURIComponent(ip)}/${dia}`);
+    const usadas = +(await (await cache.match(marca))?.text() || 0);
+    if (usadas >= HIST_ESCRITURAS_IP) return json({ ...doc, anotado:0, motivo:'límite diario' }, h);
+    await cache.put(marca, new Response(String(usadas + 1), { headers:{ 'Cache-Control':'max-age=90000' } }));
+    doc.actualizado = Date.now();
+    await grabarKV(env, k, doc);
+  }
+  return json({ ...doc, anotado:vistos.length }, h);
+}
+
+/* ============================================================
    CAMPAÑAS — compra grupal y preventa
    Tienen que vivir en el servidor: si las reservas quedan en el
    navegador de cada uno, nadie ve lo que reservó el otro y la
@@ -209,7 +306,10 @@ function estadoServidor(env, cors){
     base: !!env.NIJU,
     asesor: !!env.ANTHROPIC_API_KEY,
     cuentas: !!(env.NIJU && secretoSesion(env)),
-    emails: !!(env.RESEND_API_KEY && env.AVISOS_DESDE)
+    emails: !!(env.RESEND_API_KEY && env.AVISOS_DESDE),
+    historial: !!env.NIJU,
+    /* Tiendas que necesitan clave: la app las prende sola cuando están. */
+    tiendas: { meli: !!(env.MELI_TOKEN || (env.MELI_APP_ID && env.MELI_SECRET)) }
   }, sinCache(cors));
 }
 
@@ -1275,7 +1375,7 @@ async function solicitudes(req, url, env, cors){
   await env.NIJU.put(limite, String(usadas + 1), { expirationTtl:90000 });
 
   const cuerpo = await req.json().catch(() => ({}));
-  if (!['exportar', 'desarrollo'].includes(cuerpo.tipo)) return json({ error:'tipo de solicitud desconocido' }, h, 400);
+  if (!['exportar', 'desarrollo', 'negocio'].includes(cuerpo.tipo)) return json({ error:'tipo de solicitud desconocido' }, h, 400);
   const crudo = JSON.stringify(cuerpo.datos || {});
   if (crudo.length > 12000) return json({ error:'La solicitud es demasiado larga.' }, h, 400);
   const datos = JSON.parse(crudo);
@@ -1570,7 +1670,10 @@ function oferta(o){
     cuotas: o.cuotas || 0, cuotaValor: o.cuotaValor ?? null, reputacion: o.reputacion ?? 4,
     vendidos: o.vendidos || 0, url: o.url, rubro: o.rubro || '',
     pesoKg: o.pesoKg || 1, specs: o.specs || {}, tags: o.tags || [],
-    imagen: o.imagen || null, vendedor: o.vendedor || '', demo:false
+    imagen: o.imagen || null, vendedor: o.vendedor || '', demo:false,
+    /* Solo lo que la tienda informa: 'nuevo' | 'usado' | 'reacondicionado'
+       y sellos como 'full' (Mercado Libre despacha desde su depósito). */
+    condicion: o.condicion || null
   };
 }
 
@@ -1619,28 +1722,39 @@ const ADAPTADORES = {
     }
   },
 
-  /* ---------- Mercado Libre: exige token OAuth de app registrada ---------- */
+  /* ---------- Mercado Libre: exige token OAuth de app registrada ----------
+     Primero la búsqueda de publicaciones (/sites/MLA/search). Desde 2025
+     Mercado Libre se la niega a muchas apps nuevas aunque el token sea
+     válido (403): en ese caso vamos por el catálogo (/products/search) y
+     tomamos la publicación ganadora de cada producto. */
   meli: {
     modo:'api',
-    async buscar({ q, limite, env }){
+    async buscar({ q, limite, desde, env }){
       const token = await tokenMeli(env);
-      const u = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(q)}&limit=${limite}`;
-      const d = await pedir(u, { headers:{ Authorization:`Bearer ${token}` } });
-      return (d.results || []).map(it => oferta({
-        id:`meli-${it.id}`, tiendaId:'meli',
-        titulo:it.title, marca:(it.attributes || []).find(a => a.id === 'BRAND')?.value_name || '',
-        modelo:(it.attributes || []).find(a => a.id === 'MODEL')?.value_name || '',
-        precio:it.price, precioLista:it.original_price || null, moneda:it.currency_id,
-        envio:it.shipping?.free_shipping ? 0 : 4800,
-        entregaDias:[2, 6], stock:it.available_quantity,
-        /* solo contamos cuotas SIN interés: publicar "12 cuotas" cuando
-           tienen recargo es hacerle creer al cliente algo que no es */
-        cuotas: (it.installments && (it.installments.rate || 0) === 0) ? (it.installments.quantity || 0) : 0,
-        cuotaValor: (it.installments && (it.installments.rate || 0) === 0) ? (it.installments.amount || null) : null,
-        reputacion:4.5, vendidos:it.sold_quantity || 0,
-        url:it.permalink, imagen:it.thumbnail?.replace('-I.jpg','-O.jpg'),
-        vendedor:it.seller?.nickname || 'Mercado Libre'
-      }));
+      const auth = { headers:{ Authorization:`Bearer ${token}` } };
+      try{
+        const u = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(q)}&limit=${limite}&offset=${desde || 0}`;
+        const d = await pedir(u, auth);
+        return (d.results || []).map(ofertaMeli);
+      }catch(e){
+        if (!/HTTP 40[13]/.test(String(e.message))) throw e;
+      }
+      const cat = await pedir(`https://api.mercadolibre.com/products/search?status=active&site_id=MLA&q=${encodeURIComponent(q)}&limit=${Math.min(limite, 12)}`, auth);
+      const productos = (cat.results || []).slice(0, 12);
+      const fichas = await Promise.all(productos.map(p =>
+        pedir(`https://api.mercadolibre.com/products/${p.id}`, auth).catch(() => null)));
+      return fichas.filter(f => f && f.buy_box_winner && f.buy_box_winner.price).map(f => {
+        const g = f.buy_box_winner;
+        const attr = id => (f.attributes || []).find(a => a.id === id)?.value_name || '';
+        return ofertaMeli({
+          id:g.item_id || f.id, title:f.name, price:g.price, original_price:g.original_price,
+          currency_id:g.currency_id || 'ARS', shipping:g.shipping, installments:g.installments,
+          available_quantity:g.available_quantity, sold_quantity:g.sold_quantity, condition:g.condition,
+          permalink:f.permalink || `https://www.mercadolibre.com.ar/p/${f.id}`,
+          thumbnail:f.pictures?.[0]?.url, seller:{ nickname:g.seller_nickname },
+          attributes:[{ id:'BRAND', value_name:attr('BRAND') }, { id:'MODEL', value_name:attr('MODEL') }]
+        });
+      });
     }
   },
 
@@ -2025,6 +2139,29 @@ function vtex(id, host, entregaDias){
 
 /* ================== AUXILIARES ================== */
 
+/* Publicación de Mercado Libre → Oferta. Lo que no informa, no se inventa:
+   "FULL" solo si el envío sale del depósito de ML (fulfillment), cuotas solo
+   si son sin interés, reacondicionado solo si ML o el título lo dicen. */
+function ofertaMeli(it){
+  const attr = id => (it.attributes || []).find(a => a.id === id)?.value_name || '';
+  const reacond = /reacondicionad/i.test(it.title || '') || /reacondicionad/i.test(attr('ITEM_CONDITION'));
+  const sinInteres = it.installments && (it.installments.rate || 0) === 0;
+  return oferta({
+    id:`meli-${it.id}`, tiendaId:'meli',
+    titulo:it.title, marca:attr('BRAND'), modelo:attr('MODEL'),
+    precio:it.price, precioLista:it.original_price > it.price ? it.original_price : null, moneda:it.currency_id || 'ARS',
+    envio:it.shipping?.free_shipping ? 0 : 4800,
+    entregaDias:[2, 6], stock:it.available_quantity ?? 1,
+    cuotas: sinInteres ? (it.installments.quantity || 0) : 0,
+    cuotaValor: sinInteres ? (it.installments.amount || null) : null,
+    reputacion:4.5, vendidos:it.sold_quantity || 0,
+    url:it.permalink, imagen:(it.thumbnail || '').replace(/-I\.(jpg|webp)$/, '-O.$1') || null,
+    vendedor:it.seller?.nickname || 'Mercado Libre',
+    condicion: reacond ? 'reacondicionado' : it.condition === 'used' ? 'usado' : it.condition === 'new' ? 'nuevo' : null,
+    tags: it.shipping?.logistic_type === 'fulfillment' ? ['full'] : []
+  });
+}
+
 /* Mercado Libre entrega tokens que vencen a las 6 horas. Pegarlo a mano
    significaría volver a pegarlo tres veces por día: lo pedimos solos con
    el App ID y el Secret, y lo renovamos cuando se vence. */
@@ -2122,4 +2259,81 @@ function md5(s){
   }
   const hex = n => { let o = ''; for (let i = 0; i < 4; i++) o += ((n >> (i * 8 + 4)) & 0x0F).toString(16) + ((n >> (i * 8)) & 0x0F).toString(16); return o; };
   return hex(a) + hex(b) + hex(c) + hex(d);
+}
+
+
+/* ------------------------------------------------------------------
+   "Hacemos tu negocio" con IA gratuita (Gemini, capa gratis de Google
+   AI Studio). La clave va solo acá: GEMINI_API_KEY. Sin clave la app
+   hace el estudio con su motor propio y lo dice.
+   ------------------------------------------------------------------ */
+const GEMINI_MODELO = 'gemini-2.5-flash';
+const SISTEMA_NEGOCIO = `Sos el analista de negocios de NiJu, una empresa argentina que compra, importa, financia y monta negocios para sus clientes.
+Escribí en castellano rioplatense, claro y concreto, para alguien que no sabe de negocios.
+Usá SOLO los números del CONTEXTO (vienen de fuentes oficiales o de supuestos que el cliente puede cambiar): no inventes precios, tasas, poblaciones ni estadísticas.
+Si un dato no está, decí qué habría que averiguar y cómo.
+Estructura: 1) Qué tan viable es y por qué. 2) Riesgos principales. 3) Qué haría primero (3 pasos). 4) Alternativas si no conviene. Máximo 350 palabras. Sin markdown de tablas.`;
+
+async function negocioIA(req, env, cors){
+  const h = { ...cors, 'Cache-Control':'no-store' };
+  if (req.method !== 'POST') return json({ ok:false, error:'Usá POST.' }, h, 405);
+  if (!env.GEMINI_API_KEY) return json({ ok:false, sinClave:true, error:'La IA todavía no está encendida en el servidor.' }, h);
+  let b;
+  try{ b = await req.json(); }catch{ return json({ ok:false, error:'Pedido inválido.' }, h, 400); }
+
+  if (env.NIJU){
+    const clave = `negocio-ia:${new Date().toISOString().slice(0, 10)}:${req.headers.get('cf-connecting-ip') || 'sin-ip'}`;
+    const usadas = +(await env.NIJU.get(clave) || 0);
+    if (usadas >= 20) return json({ ok:false, error:'Llegaste al límite de estudios con IA de hoy. Mañana se renueva.' }, h, 429);
+    await env.NIJU.put(clave, String(usadas + 1), { expirationTtl:90000 });
+  }
+
+  let partes;
+  if (b.accion === 'describir'){
+    const foto = String(b.imagen || '');
+    const m = foto.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+    if (!m || foto.length > 1400000) return json({ ok:false, error:'La foto no es válida o es muy grande.' }, h, 400);
+    partes = [{ text:'Decí en una sola línea, en castellano, qué producto o máquina se ve en la foto (tipo, y marca o modelo si se lee). Solo la línea.' },
+      { inline_data:{ mime_type:m[1], data:m[2] } }];
+  } else if (b.accion === 'estudio'){
+    partes = [{ text:`${SISTEMA_NEGOCIO}\n\nCONTEXTO\n${String(JSON.stringify(b.contexto || {})).slice(0, 14000)}` }];
+  } else return json({ ok:false, error:'Acción desconocida.' }, h, 400);
+
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODELO}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+    method:'POST', headers:{ 'content-type':'application/json' },
+    body:JSON.stringify({ contents:[{ role:'user', parts:partes }], generationConfig:{ temperature:0.4, maxOutputTokens:1200 } })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return json({ ok:false, error:d.error?.message || `Gemini respondió ${r.status}` }, h, 502);
+  const texto = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+  if (!texto) return json({ ok:false, error:'La IA no devolvió respuesta.' }, h, 502);
+  return json({ ok:true, texto, modelo:GEMINI_MODELO }, h);
+}
+
+/* ------------------------------------------------------------------
+   Agente de importación tercerizado. NiJu muestra la cotización con
+   su marca, pero SOLO con un acuerdo firmado: el agente entrega una
+   dirección de su API (AGENTE_URL) y una clave (AGENTE_TOKEN). No se
+   usa el servidor privado de nadie sin permiso.
+   Pedido: { productos:[{ descripcion, ncm, cantidad, fobUSD, kg, m3, origen }], modalidad:'air'|'maritime', licencia:'empresa'|'propia' }
+   Respuesta esperada del agente: { totalUSD, lineas:[{ concepto, usd }], plazo }
+   ------------------------------------------------------------------ */
+async function agenteCotizar(req, env, cors){
+  const h = { ...cors, 'Cache-Control':'no-store' };
+  if (req.method !== 'POST') return json({ ok:false, error:'Usá POST.' }, h, 405);
+  if (!env.AGENTE_URL || !env.AGENTE_TOKEN) return json({ ok:false, activo:false, error:'La cotización en vivo del agente todavía no está conectada.' }, h);
+  const b = await req.json().catch(() => null);
+  if (!b || !Array.isArray(b.productos) || !b.productos.length) return json({ ok:false, error:'Faltan los productos.' }, h, 400);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
+  try{
+    const r = await fetch(env.AGENTE_URL, { method:'POST', signal:ctrl.signal,
+      headers:{ 'content-type':'application/json', authorization:'Bearer ' + env.AGENTE_TOKEN },
+      body:JSON.stringify({ productos:b.productos.slice(0, 20), modalidad:b.modalidad, licencia:b.licencia }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ ok:false, activo:true, error:d.error || `El agente respondió ${r.status}` }, h, 502);
+    return json({ ok:true, activo:true, totalUSD:+d.totalUSD || null, lineas:Array.isArray(d.lineas) ? d.lineas : [], plazo:d.plazo || null, consultado:Date.now() }, h);
+  }catch(e){
+    return json({ ok:false, activo:true, error:e.name === 'AbortError' ? 'El agente tardó demasiado en responder.' : String(e.message || e) }, h, 502);
+  }finally{ clearTimeout(t); }
 }

@@ -5,7 +5,7 @@ export const CONFIG = {
   nombre: 'NiJu',
   claim: 'Comprá todo, de todo y para todo.',
   claimLargo: 'Un solo lugar. Una app. El mundo a tus dedos: sin trámites, sin riesgos, del deseo a tu casa.',
-  version: '0.5.0',
+  version: '0.6.0',
 
   /** Datos del titular para los términos y el pie. Se completan al
       constituir la empresa (y con ellos, el Data Fiscal de ARCA). */

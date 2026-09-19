@@ -28,7 +28,7 @@ import { vistaPanel } from './ui/panel.js';
 import { vistaMensajes } from './ui/mensajes.js';
 import { vistaTiendas } from './ui/tiendas.js';
 import { vistaMisCompras } from './ui/ordenes.js';
-import { modo, hayCuenta, refrescarPerfil } from './engine/nube.js';
+import { modo, hayCuenta, refrescarPerfil, estadoServidor } from './engine/nube.js';
 import { listarOrdenes } from './engine/ordenes.js';
 import { misPedidos } from './engine/demanda.js';
 import { tiendasActivas } from './connectors/registry.js';
@@ -536,6 +536,13 @@ async function iniciar(){
   if (['/panel', '/tiendas'].includes(rutaInicial) && !esDueno()){
     history.replaceState(null, '', location.pathname + location.search + '#/');
   }
+
+  /* Mercado Libre necesita una app registrada (MELI_APP_ID y MELI_SECRET en
+     Cloudflare). Cuando el servidor dice que las tiene, entra sola a la
+     comparación, sin tocar la configuración. */
+  estadoServidor().then(e => {
+    if (e?.tiendas?.meli && !CONFIG.tiendasReales.includes('meli')) CONFIG.tiendasReales.push('meli');
+  });
 
   window.addEventListener('hashchange', () => rutear(ctx));
   rutear(ctx);
